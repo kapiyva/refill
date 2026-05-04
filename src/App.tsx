@@ -2,14 +2,24 @@ import { useEffect, useMemo, useState } from "react";
 import { FileOpener } from "./components/FileOpener";
 import { Sidebar } from "./components/Sidebar";
 import { RecordList } from "./components/RecordList";
-import { loadDatabase, type Database } from "./db/sqlite";
+import {
+  createEmptyDatabase,
+  loadDatabase,
+  type Database,
+} from "./db/sqlite";
 import { inspectDatabase } from "./db/inspect";
+import {
+  applyFormatSql,
+  fetchFormatSql,
+  formatUrlDisplayName,
+  normalizeFormatUrl,
+} from "./db/format";
 import { listNotes, type NoteListItem } from "./db/records";
 import type { DatabaseInspection } from "./types";
 
 type LoadedDb = {
   db: Database;
-  fileName: string;
+  source: string;
   inspection: DatabaseInspection;
 };
 
@@ -48,8 +58,34 @@ export default function App() {
       const db = await loadDatabase(bytes);
       const inspection = inspectDatabase(db);
       loaded?.db.close();
-      setLoaded({ db, fileName: file.name, inspection });
+      setLoaded({ db, source: file.name, inspection });
       setSelectedTable(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function handleApplyUrl(rawInput: string) {
+    setError(null);
+    try {
+      const url = normalizeFormatUrl(rawInput);
+      const sql = await fetchFormatSql(url);
+      if (loaded) {
+        applyFormatSql(loaded.db, sql);
+        const inspection = inspectDatabase(loaded.db);
+        setLoaded({ ...loaded, inspection });
+      } else {
+        const db = await createEmptyDatabase();
+        try {
+          applyFormatSql(db, sql);
+        } catch (e) {
+          db.close();
+          throw e;
+        }
+        const inspection = inspectDatabase(db);
+        setLoaded({ db, source: formatUrlDisplayName(url), inspection });
+        setSelectedTable(null);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -65,7 +101,7 @@ export default function App() {
   if (!loaded) {
     return (
       <>
-        <FileOpener onOpen={handleOpen} />
+        <FileOpener onOpen={handleOpen} onApplyUrl={handleApplyUrl} />
         {error && (
           <div className="fixed bottom-4 left-1/2 -translate-x-1/2 rounded bg-red-100 px-4 py-2 text-sm text-red-800">
             {error}
@@ -81,8 +117,9 @@ export default function App() {
         inspection={loaded.inspection}
         selectedTable={selectedTable}
         onSelectTable={setSelectedTable}
-        fileName={loaded.fileName}
+        source={loaded.source}
         onClose={handleClose}
+        onApplyUrl={handleApplyUrl}
       />
       <main className="flex-1 overflow-hidden">
         {selectedTable ? (

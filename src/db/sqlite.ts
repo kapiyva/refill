@@ -33,3 +33,8 @@ export async function loadDatabase(bytes: Uint8Array): Promise<Database> {
   }
   return db;
 }
+
+export async function createEmptyDatabase(): Promise<Database> {
+  const sqlite3 = await initSqlite();
+  return new sqlite3.oo1.DB(":memory:", "c");
+}
