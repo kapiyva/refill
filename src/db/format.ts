@@ -8,10 +8,10 @@ export function normalizeFormatUrl(input: string): string {
   try {
     url = new URL(trimmed);
   } catch {
-    throw new FormatUrlError("URL の形式が正しくありません");
+    throw new FormatUrlError("Invalid URL");
   }
   if (url.protocol !== "https:") {
-    throw new FormatUrlError("https:// の URL を指定してください");
+    throw new FormatUrlError("URL must use https://");
   }
   if (url.hostname === "raw.githubusercontent.com") {
     return `https://raw.githubusercontent.com${url.pathname}`;
@@ -21,18 +21,18 @@ export function normalizeFormatUrl(input: string): string {
       /^\/([^/]+)\/([^/]+)\/blob\/([^/]+)\/(.+)$/,
     );
     if (!m) {
-      throw new FormatUrlError("GitHub の blob URL が正しくありません");
+      throw new FormatUrlError("Not a valid GitHub blob URL");
     }
     const [, owner, repo, ref, path] = m;
     return `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${path}`;
   }
-  throw new FormatUrlError("GitHub の URL のみ受け付けます");
+  throw new FormatUrlError("Only GitHub URLs are accepted");
 }
 
 export async function fetchFormatSql(rawUrl: string): Promise<string> {
   const res = await fetch(rawUrl);
   if (!res.ok) {
-    throw new FormatUrlError(`取得に失敗しました (HTTP ${res.status})`);
+    throw new FormatUrlError(`Fetch failed (HTTP ${res.status})`);
   }
   return res.text();
 }

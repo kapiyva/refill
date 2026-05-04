@@ -120,7 +120,7 @@ export function NoteDetail({
           type="text"
           value={form.title}
           onChange={(e) => setForm({ ...form, title: e.target.value })}
-          placeholder="タイトル (必須)"
+          placeholder="Title (required)"
           className="flex-1 rounded border border-transparent px-2 py-1 text-base font-medium hover:border-gray-200 focus:border-gray-300 focus:outline-none"
         />
         <div className="flex shrink-0 items-center gap-2">
@@ -130,7 +130,7 @@ export function NoteDetail({
             disabled={titleEmpty}
             className="rounded bg-blue-600 px-3 py-1 text-sm text-white hover:bg-blue-700 disabled:bg-gray-300"
           >
-            保存
+            Save
           </button>
           {onDelete && mode === "edit" && (
             <button
@@ -138,7 +138,7 @@ export function NoteDetail({
               onClick={() => setConfirmOpen(true)}
               className="rounded border border-gray-300 px-3 py-1 text-sm text-red-600 hover:bg-red-50"
             >
-              削除
+              Delete
             </button>
           )}
         </div>
@@ -148,14 +148,14 @@ export function NoteDetail({
         <div className="flex flex-1 flex-col">
           <div className="flex items-center justify-between border-b border-gray-100 px-4 py-1">
             <span className="text-xs uppercase tracking-wider text-gray-500">
-              本文
+              Body
             </span>
             <button
               type="button"
               onClick={() => setPreviewMode((p) => !p)}
               className="text-xs text-gray-500 hover:text-gray-900"
             >
-              {previewMode ? "編集" : "プレビュー"}
+              {previewMode ? "Edit" : "Preview"}
             </button>
           </div>
           {previewMode ? (
@@ -174,7 +174,7 @@ export function NoteDetail({
 
         <aside className="w-72 shrink-0 overflow-y-auto border-l border-gray-200 bg-gray-50 p-3">
           <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
-            プロパティ
+            Properties
           </div>
           <PropertyPanel
             columns={extraColumns}
@@ -210,9 +210,9 @@ export function NoteDetail({
 
       <ConfirmDialog
         open={confirmOpen}
-        title="削除しますか？"
-        message="このレコードを削除します。元に戻せません。"
-        confirmLabel="削除"
+        title="Delete this record?"
+        message="This record will be deleted permanently."
+        confirmLabel="Delete"
         destructive
         onConfirm={() => {
           setConfirmOpen(false);

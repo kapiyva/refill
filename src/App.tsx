@@ -93,7 +93,7 @@ export default function App() {
 
   const confirmDiscardIfDirty = useCallback((): boolean => {
     if (!dirty) return true;
-    return window.confirm("未保存の変更があります。破棄しますか？");
+    return window.confirm("You have unsaved changes. Discard them?");
   }, [dirty]);
 
   async function handleOpen(file: File) {
@@ -281,7 +281,7 @@ export default function App() {
               />
             ) : (
               <div className="flex h-full items-center justify-center text-sm text-gray-400">
-                ノートテーブルかビューを選択
+                Select a note table or view
               </div>
             )}
           </div>
@@ -303,7 +303,7 @@ export default function App() {
             ) : (
               <div className="flex h-full items-center justify-center text-sm text-gray-400">
                 {selectedTable
-                  ? "レコードを選択するか「＋ 新規」で作成"
+                  ? "Select a record or click + New"
                   : ""}
               </div>
             )}

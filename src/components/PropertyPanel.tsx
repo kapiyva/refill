@@ -9,7 +9,7 @@ type Props = {
 export function PropertyPanel({ columns, values, onChange }: Props) {
   if (columns.length === 0) {
     return (
-      <div className="text-xs text-gray-400">追加プロパティはありません</div>
+      <div className="text-xs text-gray-400">No additional properties</div>
     );
   }
 
@@ -43,7 +43,7 @@ export function PropertyPanel({ columns, values, onChange }: Props) {
                 <button
                   type="button"
                   onClick={() => update(col, null)}
-                  title="NULL に設定"
+                  title="Set to NULL"
                   className="absolute top-1/2 right-1 -translate-y-1/2 px-1 text-gray-400 hover:text-gray-700"
                 >
                   ×

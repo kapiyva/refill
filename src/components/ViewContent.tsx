@@ -26,14 +26,14 @@ export function ViewContent({ db, viewName }: Props) {
       <header className="border-b border-gray-200 px-4 py-2">
         <h2 className="text-sm font-medium text-gray-900">{viewName}</h2>
         <p className="text-xs text-gray-500">
-          {data.rows.length} 件 (読み取り専用)
+          {data.rows.length} {data.rows.length === 1 ? "row" : "rows"} (read-only)
         </p>
       </header>
       {error ? (
         <div className="p-4 text-sm text-red-600">{error}</div>
       ) : data.rows.length === 0 ? (
         <div className="flex flex-1 items-center justify-center text-sm text-gray-400">
-          レコードがありません
+          No rows
         </div>
       ) : (
         <div className="flex-1 overflow-auto">

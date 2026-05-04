@@ -50,12 +50,12 @@ export function RelatedRecordDialog({
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="mb-1 text-sm font-semibold">
-          {mode === "new" ? "新規追加" : "編集"}
+          {mode === "new" ? "Add new" : "Edit"}
         </h3>
         <p className="mb-3 text-xs text-gray-500">{tableName}</p>
         {editableColumns.length === 0 ? (
           <p className="mb-3 text-xs text-gray-400">
-            編集可能なカラムがありません
+            No editable columns
           </p>
         ) : (
           <PropertyPanel
@@ -70,14 +70,14 @@ export function RelatedRecordDialog({
             onClick={onCancel}
             className="rounded border border-gray-300 px-3 py-1 text-sm hover:bg-gray-50"
           >
-            キャンセル
+            Cancel
           </button>
           <button
             type="button"
             onClick={() => onSave(values)}
             className="rounded bg-blue-600 px-3 py-1 text-sm text-white hover:bg-blue-700"
           >
-            保存
+            Save
           </button>
         </div>
       </div>

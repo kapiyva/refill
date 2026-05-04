@@ -41,14 +41,14 @@ export function FileOpener({ onOpen, onApplyUrl }: Props) {
 
       <div className="flex flex-col items-center gap-2">
         <p className="text-sm text-gray-500">
-          SQLite ファイルを選択するか、ここにドロップしてください
+          Select a SQLite file or drop one here
         </p>
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
           className="rounded border border-gray-300 px-4 py-2 text-sm hover:bg-gray-50"
         >
-          ファイルを選択
+          Open file
         </button>
         <input
           ref={inputRef}
@@ -64,7 +64,7 @@ export function FileOpener({ onOpen, onApplyUrl }: Props) {
 
       <div className="flex w-full max-w-md flex-col items-center gap-2">
         <p className="text-sm text-gray-500">
-          または GitHub の format.sql の URL から取り込む
+          Or apply a format from a GitHub URL
         </p>
         <form onSubmit={handleUrlSubmit} className="flex w-full gap-2">
           <input
@@ -78,7 +78,7 @@ export function FileOpener({ onOpen, onApplyUrl }: Props) {
             type="submit"
             className="rounded border border-gray-300 px-4 py-2 text-sm hover:bg-gray-50"
           >
-            取り込む
+            Apply
           </button>
         </form>
       </div>

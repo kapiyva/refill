@@ -20,19 +20,21 @@ export function RecordList({
       <header className="flex items-center justify-between border-b border-gray-200 px-4 py-2">
         <div>
           <h2 className="text-sm font-medium text-gray-900">{tableName}</h2>
-          <p className="text-xs text-gray-500">{records.length} 件</p>
+          <p className="text-xs text-gray-500">
+            {records.length} {records.length === 1 ? "record" : "records"}
+          </p>
         </div>
         <button
           type="button"
           onClick={onNewRecord}
           className="rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50"
         >
-          ＋ 新規
+          + New
         </button>
       </header>
       {records.length === 0 ? (
         <div className="flex flex-1 items-center justify-center text-sm text-gray-400">
-          レコードがありません
+          No records
         </div>
       ) : (
         <ul className="flex-1 overflow-y-auto">

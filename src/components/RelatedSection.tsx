@@ -61,7 +61,7 @@ export function RelatedSection({ db, relatedTables, noteId }: Props) {
     return (
       <Section>
         <p className="text-xs text-gray-400">
-          ノートを保存してから追加できます
+          Save the note before adding related rows.
         </p>
       </Section>
     );
@@ -163,14 +163,14 @@ export function RelatedSection({ db, relatedTables, noteId }: Props) {
                   type="button"
                   onClick={() => setConfirmDeleteRowid(row.rowid)}
                   className="px-2 py-1 text-gray-400 opacity-0 group-hover:opacity-100 hover:text-red-600"
-                  title="削除"
+                  title="Delete"
                 >
                   ×
                 </button>
               </li>
             ))}
             {rows.length === 0 && (
-              <li className="px-2 py-1 text-xs text-gray-400">なし</li>
+              <li className="px-2 py-1 text-xs text-gray-400">None</li>
             )}
           </ul>
           <button
@@ -178,7 +178,7 @@ export function RelatedSection({ db, relatedTables, noteId }: Props) {
             onClick={() => setDialog({ kind: "new" })}
             className="w-full rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50"
           >
-            ＋ 追加
+            + Add
           </button>
         </div>
       )}
@@ -207,9 +207,9 @@ export function RelatedSection({ db, relatedTables, noteId }: Props) {
 
       <ConfirmDialog
         open={confirmDeleteRowid !== null}
-        title="削除しますか？"
-        message="この関連レコードを削除します。"
-        confirmLabel="削除"
+        title="Delete this row?"
+        message="This related row will be deleted."
+        confirmLabel="Delete"
         destructive
         onConfirm={() =>
           confirmDeleteRowid !== null && handleDelete(confirmDeleteRowid)
@@ -224,7 +224,7 @@ function Section({ children }: { children: React.ReactNode }) {
   return (
     <div className="mt-4 border-t border-gray-200 pt-3">
       <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
-        関連
+        Related
       </div>
       {children}
     </div>

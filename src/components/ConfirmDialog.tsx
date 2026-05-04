@@ -16,7 +16,7 @@ export function ConfirmDialog({
   title,
   message,
   confirmLabel = "OK",
-  cancelLabel = "キャンセル",
+  cancelLabel = "Cancel",
   destructive = false,
   onConfirm,
   onCancel,

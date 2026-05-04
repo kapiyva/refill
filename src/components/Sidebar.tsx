@@ -35,7 +35,7 @@ export function Sidebar({
             type="button"
             onClick={onDownload}
             className="text-xs text-gray-500 hover:text-gray-900"
-            title="DB をダウンロード"
+            title="Download database"
           >
             ⬇
           </button>
@@ -43,7 +43,7 @@ export function Sidebar({
             type="button"
             onClick={onClose}
             className="text-xs text-gray-500 hover:text-gray-900"
-            title="ファイルを閉じる"
+            title="Close file"
           >
             ✕
           </button>
@@ -51,9 +51,9 @@ export function Sidebar({
       </header>
 
       <nav className="flex-1 overflow-y-auto p-2 text-sm">
-        <Section title="ノート">
+        <Section title="Notes">
           {inspection.noteTables.length === 0 ? (
-            <Empty>ノートテーブルなし</Empty>
+            <Empty>No note tables</Empty>
           ) : (
             inspection.noteTables.map((t) => (
               <Item
@@ -67,9 +67,9 @@ export function Sidebar({
           )}
         </Section>
 
-        <Section title="ビュー">
+        <Section title="Views">
           {inspection.views.length === 0 ? (
-            <Empty>ビューなし</Empty>
+            <Empty>No views</Empty>
           ) : (
             inspection.views.map((v) => (
               <Item
@@ -111,7 +111,7 @@ function ApplyUrlPanel({ onApplyUrl }: { onApplyUrl: (url: string) => void }) {
             autoFocus
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="GitHub の format.sql の URL"
+            placeholder="GitHub URL of format.sql"
             className="rounded border border-gray-300 px-2 py-1 text-xs"
           />
           <div className="flex gap-2">
@@ -119,7 +119,7 @@ function ApplyUrlPanel({ onApplyUrl }: { onApplyUrl: (url: string) => void }) {
               type="submit"
               className="flex-1 rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-100"
             >
-              追加
+              Apply
             </button>
             <button
               type="button"
@@ -129,7 +129,7 @@ function ApplyUrlPanel({ onApplyUrl }: { onApplyUrl: (url: string) => void }) {
               }}
               className="rounded px-2 py-1 text-xs text-gray-500 hover:text-gray-900"
             >
-              キャンセル
+              Cancel
             </button>
           </div>
         </form>
@@ -139,7 +139,7 @@ function ApplyUrlPanel({ onApplyUrl }: { onApplyUrl: (url: string) => void }) {
           onClick={() => setOpen(true)}
           className="w-full rounded px-2 py-1 text-left text-xs text-gray-600 hover:bg-gray-200"
         >
-          ＋ フォーマットを URL から追加
+          + Apply format from URL
         </button>
       )}
     </div>
