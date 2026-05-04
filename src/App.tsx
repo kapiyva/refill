@@ -3,6 +3,7 @@ import { FileOpener } from "./components/FileOpener";
 import { Sidebar } from "./components/Sidebar";
 import { RecordList } from "./components/RecordList";
 import { NoteDetail } from "./components/NoteDetail";
+import { ViewContent } from "./components/ViewContent";
 import {
   createEmptyDatabase,
   exportDatabase,
@@ -42,6 +43,7 @@ export default function App() {
   const [loaded, setLoaded] = useState<LoadedDb | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
+  const [selectedView, setSelectedView] = useState<string | null>(null);
   const [selectedRecord, setSelectedRecord] = useState<SelectedRecord>(null);
   const [records, setRecords] = useState<NoteListItem[]>([]);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -84,10 +86,10 @@ export default function App() {
     [loaded],
   );
   useEffect(() => {
-    if (loaded && !selectedTable && firstNoteTable) {
+    if (loaded && !selectedTable && !selectedView && firstNoteTable) {
       setSelectedTable(firstNoteTable);
     }
-  }, [loaded, selectedTable, firstNoteTable]);
+  }, [loaded, selectedTable, selectedView, firstNoteTable]);
 
   const confirmDiscardIfDirty = useCallback((): boolean => {
     if (!dirty) return true;
@@ -104,6 +106,7 @@ export default function App() {
       loaded?.db.close();
       setLoaded({ db, source: file.name, inspection });
       setSelectedTable(null);
+      setSelectedView(null);
       setSelectedRecord(null);
       setDirty(false);
     } catch (e) {
@@ -132,6 +135,7 @@ export default function App() {
         const inspection = inspectDatabase(db);
         setLoaded({ db, source: formatUrlDisplayName(url), inspection });
         setSelectedTable(null);
+        setSelectedView(null);
         setSelectedRecord(null);
         setDirty(false);
       }
@@ -145,6 +149,7 @@ export default function App() {
     loaded?.db.close();
     setLoaded(null);
     setSelectedTable(null);
+    setSelectedView(null);
     setSelectedRecord(null);
     setRecords([]);
     setDirty(false);
@@ -153,6 +158,15 @@ export default function App() {
   function handleSelectTable(name: string) {
     if (!confirmDiscardIfDirty()) return;
     setSelectedTable(name);
+    setSelectedView(null);
+    setSelectedRecord(null);
+    setDirty(false);
+  }
+
+  function handleSelectView(name: string) {
+    if (!confirmDiscardIfDirty()) return;
+    setSelectedView(name);
+    setSelectedTable(null);
     setSelectedRecord(null);
     setDirty(false);
   }
@@ -242,50 +256,60 @@ export default function App() {
       <Sidebar
         inspection={loaded.inspection}
         selectedTable={selectedTable}
+        selectedView={selectedView}
         onSelectTable={handleSelectTable}
+        onSelectView={handleSelectView}
         source={loaded.source}
         onClose={handleClose}
         onApplyUrl={handleApplyUrl}
         onDownload={handleDownload}
       />
-      <div className="w-80 shrink-0 border-r border-gray-200">
-        {selectedTable ? (
-          <RecordList
-            tableName={selectedTable}
-            records={records}
-            selectedId={selectedRecordId}
-            onSelectRecord={handleSelectRecord}
-            onNewRecord={handleNewRecord}
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center text-sm text-gray-400">
-            ノートテーブルを選択
+      {selectedView ? (
+        <main className="flex-1 overflow-hidden">
+          <ViewContent db={loaded.db} viewName={selectedView} />
+        </main>
+      ) : (
+        <>
+          <div className="w-80 shrink-0 border-r border-gray-200">
+            {selectedTable ? (
+              <RecordList
+                tableName={selectedTable}
+                records={records}
+                selectedId={selectedRecordId}
+                onSelectRecord={handleSelectRecord}
+                onNewRecord={handleNewRecord}
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-gray-400">
+                ノートテーブルかビューを選択
+              </div>
+            )}
           </div>
-        )}
-      </div>
-      <main className="flex-1 overflow-hidden">
-        {selectedRecord && noteTable ? (
-          <NoteDetail
-            db={loaded.db}
-            mode={selectedRecord.kind}
-            noteTable={noteTable}
-            record={
-              selectedRecord.kind === "edit" ? editingRecord : null
-            }
-            onSave={handleSave}
-            onDelete={
-              selectedRecord.kind === "edit" ? handleDelete : undefined
-            }
-            onDirtyChange={setDirty}
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center text-sm text-gray-400">
-            {selectedTable
-              ? "レコードを選択するか「＋ 新規」で作成"
-              : ""}
-          </div>
-        )}
-      </main>
+          <main className="flex-1 overflow-hidden">
+            {selectedRecord && noteTable ? (
+              <NoteDetail
+                db={loaded.db}
+                mode={selectedRecord.kind}
+                noteTable={noteTable}
+                record={
+                  selectedRecord.kind === "edit" ? editingRecord : null
+                }
+                onSave={handleSave}
+                onDelete={
+                  selectedRecord.kind === "edit" ? handleDelete : undefined
+                }
+                onDirtyChange={setDirty}
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-gray-400">
+                {selectedTable
+                  ? "レコードを選択するか「＋ 新規」で作成"
+                  : ""}
+              </div>
+            )}
+          </main>
+        </>
+      )}
       {error && <ErrorToast message={error} />}
     </div>
   );

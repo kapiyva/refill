@@ -4,7 +4,9 @@ import type { DatabaseInspection } from "../types";
 type Props = {
   inspection: DatabaseInspection;
   selectedTable: string | null;
+  selectedView: string | null;
   onSelectTable: (name: string) => void;
+  onSelectView: (name: string) => void;
   source: string;
   onClose: () => void;
   onApplyUrl: (url: string) => void;
@@ -14,7 +16,9 @@ type Props = {
 export function Sidebar({
   inspection,
   selectedTable,
+  selectedView,
   onSelectTable,
+  onSelectView,
   source,
   onClose,
   onApplyUrl,
@@ -68,13 +72,13 @@ export function Sidebar({
             <Empty>ビューなし</Empty>
           ) : (
             inspection.views.map((v) => (
-              <div
+              <Item
                 key={v.name}
-                className="cursor-not-allowed rounded px-2 py-1 text-gray-400"
-                title="Phase 4 で対応予定"
+                selected={v.name === selectedView}
+                onClick={() => onSelectView(v.name)}
               >
                 {v.name}
-              </div>
+              </Item>
             ))
           )}
         </Section>
