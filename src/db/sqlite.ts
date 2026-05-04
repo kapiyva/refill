@@ -38,3 +38,8 @@ export async function createEmptyDatabase(): Promise<Database> {
   const sqlite3 = await initSqlite();
   return new sqlite3.oo1.DB(":memory:", "c");
 }
+
+export async function exportDatabase(db: Database): Promise<Uint8Array> {
+  const sqlite3 = await initSqlite();
+  return sqlite3.capi.sqlite3_js_db_export(db);
+}

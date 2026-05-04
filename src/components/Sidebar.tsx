@@ -8,6 +8,7 @@ type Props = {
   source: string;
   onClose: () => void;
   onApplyUrl: (url: string) => void;
+  onDownload: () => void;
 };
 
 export function Sidebar({
@@ -17,6 +18,7 @@ export function Sidebar({
   source,
   onClose,
   onApplyUrl,
+  onDownload,
 }: Props) {
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-gray-200 bg-gray-50">
@@ -24,14 +26,24 @@ export function Sidebar({
         <span className="truncate text-sm font-medium" title={source}>
           {source}
         </span>
-        <button
-          type="button"
-          onClick={onClose}
-          className="text-xs text-gray-500 hover:text-gray-900"
-          title="ファイルを閉じる"
-        >
-          ✕
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={onDownload}
+            className="text-xs text-gray-500 hover:text-gray-900"
+            title="DB をダウンロード"
+          >
+            ⬇
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-xs text-gray-500 hover:text-gray-900"
+            title="ファイルを閉じる"
+          >
+            ✕
+          </button>
+        </div>
       </header>
 
       <nav className="flex-1 overflow-y-auto p-2 text-sm">
