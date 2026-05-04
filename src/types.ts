@@ -1,6 +1,13 @@
+export type RelatedTable = {
+  name: string;
+  fkColumn: string;
+  columns: string[];
+};
+
 export type NoteTable = {
   name: string;
   columns: string[];
+  relatedTables: RelatedTable[];
 };
 
 export type ViewInfo = {

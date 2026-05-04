@@ -266,6 +266,7 @@ export default function App() {
       <main className="flex-1 overflow-hidden">
         {selectedRecord && noteTable ? (
           <NoteDetail
+            db={loaded.db}
             mode={selectedRecord.kind}
             noteTable={noteTable}
             record={

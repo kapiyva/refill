@@ -1,7 +1,8 @@
--- Seed script for manual verification (Phase 1).
+-- Seed script for manual verification.
 -- Builds a SQLite file with:
 --   * basic_v1_notes — note table with a few rows (verifies detection + listing)
---   * basic_v1_tags  — non-note table (must NOT appear in the note section)
+--   * basic_v1_tags  — non-note table without FK (must NOT appear in the note section)
+--   * basic_v1_links — FK to basic_v1_notes(id), exercises Phase 3 related table flow
 --   * basic_v1_v_recent — a view (must appear in the view section, non-clickable)
 --
 -- Generate with:
@@ -20,6 +21,13 @@ CREATE TABLE basic_v1_tags (
     name TEXT NOT NULL
 );
 
+CREATE TABLE basic_v1_links (
+    note_id    TEXT NOT NULL REFERENCES basic_v1_notes(id),
+    label      TEXT NOT NULL,
+    target_url TEXT NOT NULL,
+    sort       INTEGER
+);
+
 CREATE VIEW basic_v1_v_recent AS
     SELECT id, title, updated_at
     FROM basic_v1_notes
@@ -32,3 +40,8 @@ INSERT INTO basic_v1_notes (id, title, body, created_at, updated_at) VALUES
     ('33333333-3333-3333-3333-333333333333', 'refill 設計メモ', '# 見出し\n\n本文。', '2026-03-01T07:20:00Z', '2026-05-03T22:10:00Z');
 
 INSERT INTO basic_v1_tags (name) VALUES ('design'), ('phase1');
+
+INSERT INTO basic_v1_links (note_id, label, target_url, sort) VALUES
+    ('33333333-3333-3333-3333-333333333333', 'note.db リポジトリ', 'https://github.com/kapiyva/notedb', 1),
+    ('33333333-3333-3333-3333-333333333333', 'refill リポジトリ', 'https://github.com/kapiyva/refill', 2),
+    ('22222222-2222-2222-2222-222222222222', '仕様メモ', 'https://example.com/note-db-spec', NULL);

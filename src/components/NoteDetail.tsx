@@ -2,11 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Markdown } from "./Markdown";
 import { PropertyPanel } from "./PropertyPanel";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { RelatedSection } from "./RelatedSection";
 import type { NoteTable } from "../types";
 import { NOTE_TABLE_REQUIRED_COLUMNS } from "../types";
 import type { Record } from "../db/records";
+import type { Database } from "../db/sqlite";
 
 type Props = {
+  db: Database;
   mode: "edit" | "new";
   noteTable: NoteTable;
   record: Record | null;
@@ -36,6 +39,7 @@ function initialForm(record: Record | null, extraColumns: string[]): FormState {
 }
 
 export function NoteDetail({
+  db,
   mode,
   noteTable,
   record,
@@ -193,6 +197,14 @@ export function NoteDetail({
               </div>
             </div>
           )}
+
+          <RelatedSection
+            db={db}
+            relatedTables={noteTable.relatedTables}
+            noteId={
+              mode === "edit" && record ? String(record.id) : null
+            }
+          />
         </aside>
       </div>
 
