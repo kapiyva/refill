@@ -1,29 +1,35 @@
 import { useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { RelatedRecordDialog } from "./RelatedRecordDialog";
+import { PropertyRowDialog } from "./PropertyRowDialog";
 import {
-  deleteRelated,
-  insertRelated,
-  listRelated,
-  updateRelated,
-  type RelatedRow,
-} from "../db/related";
+  deletePropertyRow,
+  insertPropertyRow,
+  listPropertyRows,
+  updatePropertyRow,
+  type PropertyRow,
+} from "../db/property";
 import type { Database } from "../db/sqlite";
-import type { RelatedTable } from "../types";
+import type { PropertyTable } from "../types";
 import type { Record } from "../db/records";
 
 type DialogState =
   | { kind: "new" }
-  | { kind: "edit"; row: RelatedRow }
+  | { kind: "edit"; row: PropertyRow }
   | null;
+
+const HIDDEN_COLUMNS = new Set([
+  "rowid",
+  "created_at",
+  "updated_at",
+]);
 
 type Props = {
   db: Database;
-  relatedTables: RelatedTable[];
+  propertyTables: PropertyTable[];
   noteId: string | null;
 };
 
-export function RelatedSection({ db, relatedTables, noteId }: Props) {
+export function PropertyTables({ db, propertyTables, noteId }: Props) {
   const [activeIdx, setActiveIdx] = useState(0);
   const [refreshTick, setRefreshTick] = useState(0);
   const [dialog, setDialog] = useState<DialogState>(null);
@@ -31,14 +37,14 @@ export function RelatedSection({ db, relatedTables, noteId }: Props) {
     null,
   );
   const [error, setError] = useState<string | null>(null);
-  const [rows, setRows] = useState<RelatedRow[]>([]);
+  const [rows, setRows] = useState<PropertyRow[]>([]);
 
-  const active = relatedTables[activeIdx] ?? null;
+  const active = propertyTables[activeIdx] ?? null;
 
   const editableColumns = useMemo(() => {
     if (!active) return [];
     return active.columns.filter(
-      (c) => c !== active.fkColumn && c !== "rowid",
+      (c) => c !== active.fkColumn && !HIDDEN_COLUMNS.has(c),
     );
   }, [active]);
 
@@ -48,36 +54,42 @@ export function RelatedSection({ db, relatedTables, noteId }: Props) {
       return;
     }
     try {
-      setRows(listRelated(db, active.name, active.fkColumn, noteId));
+      setRows(listPropertyRows(db, active.name, active.fkColumn, noteId));
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }, [db, active, noteId, refreshTick]);
 
-  if (relatedTables.length === 0) return null;
+  if (propertyTables.length === 0) return null;
 
   if (!noteId) {
     return (
-      <Section>
+      <Wrapper>
         <p className="text-xs text-gray-400">
-          Save the note before adding related rows.
+          Save the note before adding property rows.
         </p>
-      </Section>
+      </Wrapper>
     );
   }
 
   function handleDialogSave(values: Record) {
     if (!active || !noteId || !dialog) return;
     setError(null);
+    const now = new Date().toISOString();
     try {
       if (dialog.kind === "new") {
-        insertRelated(db, active.name, {
+        insertPropertyRow(db, active.name, {
           [active.fkColumn]: noteId,
           ...values,
+          created_at: now,
+          updated_at: now,
         });
       } else {
-        updateRelated(db, active.name, dialog.row.rowid, values);
+        updatePropertyRow(db, active.name, dialog.row.rowid, {
+          ...values,
+          updated_at: now,
+        });
       }
       setDialog(null);
       setRefreshTick((n) => n + 1);
@@ -90,7 +102,7 @@ export function RelatedSection({ db, relatedTables, noteId }: Props) {
     if (!active) return;
     setError(null);
     try {
-      deleteRelated(db, active.name, rowid);
+      deletePropertyRow(db, active.name, rowid);
       setConfirmDeleteRowid(null);
       setRefreshTick((n) => n + 1);
     } catch (e) {
@@ -98,7 +110,7 @@ export function RelatedSection({ db, relatedTables, noteId }: Props) {
     }
   }
 
-  function rowSummary(row: RelatedRow): string {
+  function rowSummary(row: PropertyRow): string {
     return String(row.label ?? "");
   }
 
@@ -108,17 +120,17 @@ export function RelatedSection({ db, relatedTables, noteId }: Props) {
     return init;
   }
 
-  function editRecordInitial(row: RelatedRow): Record {
+  function editRecordInitial(row: PropertyRow): Record {
     const init: Record = {};
     for (const col of editableColumns) init[col] = row[col] ?? null;
     return init;
   }
 
   return (
-    <Section>
-      {relatedTables.length > 1 && (
+    <Wrapper>
+      {propertyTables.length > 1 && (
         <div className="mb-2 flex flex-wrap gap-1">
-          {relatedTables.map((t, i) => (
+          {propertyTables.map((t, i) => (
             <button
               key={t.name}
               type="button"
@@ -137,7 +149,7 @@ export function RelatedSection({ db, relatedTables, noteId }: Props) {
       )}
       {active && (
         <div>
-          {relatedTables.length === 1 && (
+          {propertyTables.length === 1 && (
             <div
               className="mb-1 truncate text-xs text-gray-500"
               title={active.name}
@@ -190,7 +202,7 @@ export function RelatedSection({ db, relatedTables, noteId }: Props) {
       )}
 
       {dialog && active && (
-        <RelatedRecordDialog
+        <PropertyRowDialog
           open
           mode={dialog.kind === "new" ? "new" : "edit"}
           tableName={active.name}
@@ -208,7 +220,7 @@ export function RelatedSection({ db, relatedTables, noteId }: Props) {
       <ConfirmDialog
         open={confirmDeleteRowid !== null}
         title="Delete this row?"
-        message="This related row will be deleted."
+        message="This property row will be deleted."
         confirmLabel="Delete"
         destructive
         onConfirm={() =>
@@ -216,17 +228,10 @@ export function RelatedSection({ db, relatedTables, noteId }: Props) {
         }
         onCancel={() => setConfirmDeleteRowid(null)}
       />
-    </Section>
+    </Wrapper>
   );
 }
 
-function Section({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="mt-4 border-t border-gray-200 pt-3">
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
-        Related
-      </div>
-      {children}
-    </div>
-  );
+function Wrapper({ children }: { children: React.ReactNode }) {
+  return <div className="mt-3">{children}</div>;
 }

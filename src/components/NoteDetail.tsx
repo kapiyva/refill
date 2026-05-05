@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Markdown } from "./Markdown";
 import { PropertyPanel } from "./PropertyPanel";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { RelatedSection } from "./RelatedSection";
+import { PropertyTables } from "./PropertyTables";
 import type { NoteTable } from "../types";
 import { NOTE_TABLE_REQUIRED_COLUMNS } from "../types";
 import type { Record } from "../db/records";
@@ -176,35 +176,27 @@ export function NoteDetail({
           <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
             Properties
           </div>
-          <PropertyPanel
-            columns={extraColumns}
-            values={form.properties}
-            onChange={(p) => setForm({ ...form, properties: p })}
-          />
-          {mode === "edit" && record && (
-            <div className="mt-4 space-y-1 border-t border-gray-200 pt-3 text-xs text-gray-500">
-              <div>
-                <span className="font-medium">id:</span>{" "}
-                <span className="break-all font-mono">{String(record.id)}</span>
-              </div>
-              <div>
-                <span className="font-medium">created_at:</span>{" "}
-                {String(record.created_at)}
-              </div>
-              <div>
-                <span className="font-medium">updated_at:</span>{" "}
-                {String(record.updated_at)}
-              </div>
-            </div>
+          {extraColumns.length === 0 &&
+          noteTable.propertyTables.length === 0 ? (
+            <p className="text-xs text-gray-400">
+              No additional properties
+            </p>
+          ) : (
+            <>
+              <PropertyPanel
+                columns={extraColumns}
+                values={form.properties}
+                onChange={(p) => setForm({ ...form, properties: p })}
+              />
+              <PropertyTables
+                db={db}
+                propertyTables={noteTable.propertyTables}
+                noteId={
+                  mode === "edit" && record ? String(record.id) : null
+                }
+              />
+            </>
           )}
-
-          <RelatedSection
-            db={db}
-            relatedTables={noteTable.relatedTables}
-            noteId={
-              mode === "edit" && record ? String(record.id) : null
-            }
-          />
         </aside>
       </div>
 

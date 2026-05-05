@@ -3,7 +3,7 @@ import {
   NOTE_TABLE_REQUIRED_COLUMNS,
   type DatabaseInspection,
   type NoteTable,
-  type RelatedTable,
+  type PropertyTable,
   type ViewInfo,
 } from "../types";
 
@@ -34,13 +34,13 @@ export function inspectDatabase(db: Database): DatabaseInspection {
       .map(([name]) => name),
   );
 
-  const relatedByNoteTable = new Map<string, RelatedTable[]>();
+  const propertyByNoteTable = new Map<string, PropertyTable[]>();
   for (const noteName of noteTableNames) {
-    relatedByNoteTable.set(noteName, []);
+    propertyByNoteTable.set(noteName, []);
   }
 
   for (const [tableName, columns] of allTableColumns) {
-    if (!columns.includes("note_id") || !columns.includes("label")) continue;
+    if (!hasRequiredPropertyColumns(columns)) continue;
     const fks = db.selectObjects(
       `SELECT "from", "table", "to" FROM pragma_foreign_key_list(?)`,
       [tableName],
@@ -51,7 +51,7 @@ export function inspectDatabase(db: Database): DatabaseInspection {
         fk.to === "id" &&
         noteTableNames.has(fk.table)
       ) {
-        relatedByNoteTable.get(fk.table)!.push({
+        propertyByNoteTable.get(fk.table)!.push({
           name: tableName,
           fkColumn: "note_id",
           columns,
@@ -67,7 +67,7 @@ export function inspectDatabase(db: Database): DatabaseInspection {
     noteTables.push({
       name,
       columns,
-      relatedTables: relatedByNoteTable.get(name) ?? [],
+      propertyTables: propertyByNoteTable.get(name) ?? [],
     });
   }
 
@@ -83,4 +83,16 @@ function columnsOf(db: Database, tableName: string): string[] {
 function isNoteTable(columns: string[]): boolean {
   const set = new Set(columns);
   return NOTE_TABLE_REQUIRED_COLUMNS.every((c) => set.has(c));
+}
+
+const PROPERTY_TABLE_REQUIRED_COLUMNS = [
+  "note_id",
+  "label",
+  "created_at",
+  "updated_at",
+] as const;
+
+function hasRequiredPropertyColumns(columns: string[]): boolean {
+  const set = new Set(columns);
+  return PROPERTY_TABLE_REQUIRED_COLUMNS.every((c) => set.has(c));
 }

@@ -12,7 +12,7 @@ type Props = {
   onCancel: () => void;
 };
 
-export function RelatedRecordDialog({
+export function PropertyRowDialog({
   open,
   mode,
   tableName,

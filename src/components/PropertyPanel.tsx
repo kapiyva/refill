@@ -7,11 +7,7 @@ type Props = {
 };
 
 export function PropertyPanel({ columns, values, onChange }: Props) {
-  if (columns.length === 0) {
-    return (
-      <div className="text-xs text-gray-400">No additional properties</div>
-    );
-  }
+  if (columns.length === 0) return null;
 
   function update(col: string, next: SqlValue) {
     onChange({ ...values, [col]: next });

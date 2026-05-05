@@ -1,29 +1,29 @@
 import type { Database } from "./sqlite";
 import type { Record, SqlValue } from "./records";
 
-export type RelatedRow = Record & { rowid: number };
+export type PropertyRow = Record & { rowid: number };
 
-export function listRelated(
+export function listPropertyRows(
   db: Database,
   tableName: string,
   fkColumn: string,
   noteId: string,
-): RelatedRow[] {
+): PropertyRow[] {
   const rows = db.selectObjects(
     `SELECT rowid, * FROM ${quoteIdent(tableName)} WHERE ${quoteIdent(fkColumn)} = ? ORDER BY rowid`,
     [noteId],
   );
-  return rows as RelatedRow[];
+  return rows as PropertyRow[];
 }
 
-export function insertRelated(
+export function insertPropertyRow(
   db: Database,
   tableName: string,
   data: Record,
 ): void {
   const cols = Object.keys(data);
   if (cols.length === 0) {
-    throw new Error("insertRelated: empty data");
+    throw new Error("insertPropertyRow: empty data");
   }
   const colList = cols.map(quoteIdent).join(", ");
   const placeholders = cols.map(() => "?").join(", ");
@@ -33,7 +33,7 @@ export function insertRelated(
   });
 }
 
-export function updateRelated(
+export function updatePropertyRow(
   db: Database,
   tableName: string,
   rowid: number,
@@ -50,7 +50,7 @@ export function updateRelated(
   });
 }
 
-export function deleteRelated(
+export function deletePropertyRow(
   db: Database,
   tableName: string,
   rowid: number,

@@ -24,6 +24,8 @@ CREATE TABLE basic_v1_tags (
 CREATE TABLE basic_v1_links (
     note_id    TEXT NOT NULL REFERENCES basic_v1_notes(id),
     label      TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
     target_url TEXT NOT NULL,
     sort       INTEGER
 );
@@ -41,7 +43,7 @@ INSERT INTO basic_v1_notes (id, title, body, created_at, updated_at) VALUES
 
 INSERT INTO basic_v1_tags (name) VALUES ('design'), ('phase1');
 
-INSERT INTO basic_v1_links (note_id, label, target_url, sort) VALUES
-    ('33333333-3333-3333-3333-333333333333', 'note.db リポジトリ', 'https://github.com/kapiyva/notedb', 1),
-    ('33333333-3333-3333-3333-333333333333', 'refill リポジトリ', 'https://github.com/kapiyva/refill', 2),
-    ('22222222-2222-2222-2222-222222222222', '仕様メモ', 'https://example.com/note-db-spec', NULL);
+INSERT INTO basic_v1_links (note_id, label, created_at, updated_at, target_url, sort) VALUES
+    ('33333333-3333-3333-3333-333333333333', 'note.db repo',  '2026-03-02T08:00:00Z', '2026-03-02T08:00:00Z', 'https://github.com/kapiyva/notedb', 1),
+    ('33333333-3333-3333-3333-333333333333', 'refill repo',   '2026-03-02T08:05:00Z', '2026-03-02T08:05:00Z', 'https://github.com/kapiyva/refill', 2),
+    ('22222222-2222-2222-2222-222222222222', 'spec memo',     '2026-02-16T10:00:00Z', '2026-02-16T10:00:00Z', 'https://example.com/note-db-spec', NULL);

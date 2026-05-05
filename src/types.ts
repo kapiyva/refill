@@ -1,4 +1,4 @@
-export type RelatedTable = {
+export type PropertyTable = {
   name: string;
   fkColumn: string;
   columns: string[];
@@ -7,7 +7,7 @@ export type RelatedTable = {
 export type NoteTable = {
   name: string;
   columns: string[];
-  relatedTables: RelatedTable[];
+  propertyTables: PropertyTable[];
 };
 
 export type ViewInfo = {
