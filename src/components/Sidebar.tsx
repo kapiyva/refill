@@ -30,25 +30,17 @@ export function Sidebar({
         <span className="truncate text-sm font-medium" title={source}>
           {source}
         </span>
-        <div className="flex shrink-0 items-center gap-1">
-          <button
-            type="button"
-            onClick={onDownload}
-            className="text-xs text-gray-500 hover:text-gray-900"
-            title="Download database"
-          >
-            ⬇
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-xs text-gray-500 hover:text-gray-900"
-            title="Close file"
-          >
-            ✕
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="shrink-0 text-xs text-gray-500 hover:text-gray-900"
+          title="Close file"
+        >
+          ✕
+        </button>
       </header>
+
+      <ApplyUrlPanel onApplyUrl={onApplyUrl} />
 
       <nav className="flex-1 overflow-y-auto p-2 text-sm">
         <Section title="Notes">
@@ -84,8 +76,37 @@ export function Sidebar({
         </Section>
       </nav>
 
-      <ApplyUrlPanel onApplyUrl={onApplyUrl} />
+      <div className="border-t border-gray-200 p-2">
+        <button
+          type="button"
+          onClick={onDownload}
+          className="flex w-full items-center justify-center gap-2 rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+        >
+          <DownloadIcon />
+          Download .db
+        </button>
+      </div>
     </aside>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
   );
 }
 
@@ -103,9 +124,9 @@ function ApplyUrlPanel({ onApplyUrl }: { onApplyUrl: (url: string) => void }) {
   }
 
   return (
-    <div className="border-t border-gray-200 p-2">
+    <div className="border-b border-gray-200 px-3 py-1">
       {open ? (
-        <form onSubmit={submit} className="flex flex-col gap-2">
+        <form onSubmit={submit} className="flex flex-col gap-1.5 py-1">
           <input
             type="url"
             autoFocus
@@ -137,7 +158,7 @@ function ApplyUrlPanel({ onApplyUrl }: { onApplyUrl: (url: string) => void }) {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="w-full rounded px-2 py-1 text-left text-xs text-gray-600 hover:bg-gray-200"
+          className="w-full text-left text-xs text-gray-400 hover:text-gray-700"
         >
           + Apply format from URL
         </button>
