@@ -9,6 +9,7 @@ import {
   exportDatabase,
   loadDatabase,
   type Database,
+  type FileHeader,
 } from "./db/sqlite";
 import { inspectDatabase } from "./db/inspect";
 import {
@@ -32,6 +33,7 @@ type LoadedDb = {
   db: Database;
   source: string;
   inspection: DatabaseInspection;
+  originalHeader: FileHeader | null;
 };
 
 type SelectedRecord =
@@ -101,10 +103,10 @@ export default function App() {
     setError(null);
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
-      const db = await loadDatabase(bytes);
+      const { db, originalHeader } = await loadDatabase(bytes);
       const inspection = inspectDatabase(db);
       loaded?.db.close();
-      setLoaded({ db, source: file.name, inspection });
+      setLoaded({ db, source: file.name, inspection, originalHeader });
       setSelectedTable(null);
       setSelectedView(null);
       setSelectedRecord(null);
@@ -133,7 +135,12 @@ export default function App() {
           throw e;
         }
         const inspection = inspectDatabase(db);
-        setLoaded({ db, source: formatUrlDisplayName(url), inspection });
+        setLoaded({
+          db,
+          source: formatUrlDisplayName(url),
+          inspection,
+          originalHeader: null,
+        });
         setSelectedTable(null);
         setSelectedView(null);
         setSelectedRecord(null);
@@ -224,7 +231,10 @@ export default function App() {
     if (!confirmDiscardIfDirty()) return;
     setError(null);
     try {
-      const bytes = await exportDatabase(loaded.db);
+      const bytes = await exportDatabase(
+        loaded.db,
+        loaded.originalHeader ?? undefined,
+      );
       const blob = new Blob([bytes as BlobPart], {
         type: "application/x-sqlite3",
       });
