@@ -152,7 +152,12 @@ export default function App() {
   }
 
   function handleClose() {
-    if (!confirmDiscardIfDirty()) return;
+    if (
+      !window.confirm(
+        "Close this file? Any in-memory changes since the last download will be lost.",
+      )
+    )
+      return;
     loaded?.db.close();
     setLoaded(null);
     setSelectedTable(null);
