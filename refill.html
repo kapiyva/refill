@@ -271,6 +271,7 @@ function applyFormat(db, sql) {
   const snapshot = sqlite3.capi.sqlite3_js_db_export(db);
   try {
     db.exec(sql);
+    if (!sqlite3.capi.sqlite3_get_autocommit(db)) throw new Error("The format leaves a transaction open (BEGIN without COMMIT)");
   } catch (e) {
     rollbackIfOpen(db);
     loadInto(db, snapshot);
@@ -312,7 +313,9 @@ function inspect(db) {
   };
   const noteNames = new Set(tables.filter((t) => hasAll(t, NOTE_COLUMNS)));
   const propertyNames = new Set(tables.filter((t) => !noteNames.has(t) && hasAll(t, PROPERTY_COLUMNS)));
-  const targets = new Set([...noteNames, ...propertyNames]);
+  // SQLite identifiers are case-insensitive: references are matched on the
+  // lower-cased name and resolved to the table's actual name.
+  const targets = new Map([...noteNames, ...propertyNames].map((t) => [t.toLowerCase(), t]));
   const refs = new Map(tables.map((t) => [t, resolveReferences(db, t, columns.get(t), targets)]));
 
   const noteTables = [...noteNames].map((name) => ({
@@ -327,7 +330,7 @@ function inspect(db) {
   // Junction table: neither note nor property table, with exactly one
   // reference to a note table and one to a property table.
   for (const t of tables) {
-    if (targets.has(t)) continue;
+    if (noteNames.has(t) || propertyNames.has(t)) continue;
     const r = [...refs.get(t).entries()];
     const toNote = r.filter(([, x]) => noteNames.has(x));
     const toProp = r.filter(([, x]) => propertyNames.has(x));
@@ -347,25 +350,28 @@ function inspect(db) {
  * match first, the table itself excluded), or no prefix at all.
  */
 function resolveReferences(db, table, cols, targets) {
+  const lower = (s) => s.toLowerCase();
   const declared = new Map();
   for (const fk of all(db, `SELECT "from", "table", "to" FROM pragma_foreign_key_list(?)`, [table])) {
-    declared.set(fk.from, fk.to === null || fk.to === "id" ? fk.table : null);
+    declared.set(lower(fk.from), fk.to === null || lower(fk.to) === "id" ? lower(fk.table) : null);
   }
+  const self = lower(table);
   const prefixes = [];
-  for (let i = table.indexOf("_"); i !== -1; i = table.indexOf("_", i + 1)) prefixes.unshift(table.slice(0, i + 1));
+  for (let i = self.indexOf("_"); i !== -1; i = self.indexOf("_", i + 1)) prefixes.unshift(self.slice(0, i + 1));
   prefixes.push("");
 
   const result = new Map();
   for (const { name } of cols) {
-    if (name === "id" || !name.endsWith("_id")) continue;
-    if (declared.has(name)) {
-      const target = declared.get(name);
-      if (target !== null && targets.has(target)) result.set(name, target);
+    const col = lower(name);
+    if (col === "id" || !col.endsWith("_id")) continue;
+    if (declared.has(col)) {
+      const target = targets.get(declared.get(col));
+      if (target) result.set(name, target);
       continue;
     }
-    const stem = name.slice(0, -3);
-    const match = prefixes.map((p) => p + stem).find((t) => t !== table && targets.has(t));
-    if (match) result.set(name, match);
+    const stem = col.slice(0, -3);
+    const match = prefixes.map((p) => p + stem).find((t) => t !== self && targets.has(t));
+    if (match) result.set(name, targets.get(match));
   }
   return result;
 }
@@ -613,14 +619,16 @@ function App() {
     await openFile(file, handle);
   });
 
-  live.current = { doc, version, modified, formDirty, openFile };
+  const openHandle = guard(async (handle) => openFile(await handle.getFile(), handle));
+
+  live.current = { doc, version, modified, formDirty, openHandle };
 
   // Installed as an app (PWA): files opened from the OS arrive here.
   useEffect(() => {
     if (!("launchQueue" in window)) return;
-    window.launchQueue.setConsumer(async (params) => {
+    window.launchQueue.setConsumer((params) => {
       const handle = params.files?.[0];
-      if (handle) live.current.openFile(await handle.getFile(), handle);
+      if (handle) live.current.openHandle(handle);
     });
   }, []);
 
@@ -716,7 +724,8 @@ function Opener({ onPick, onFile, onUrl }) {
             // the plain file before awaiting the handle.
             const dropped = e.dataTransfer.files[0];
             const item = e.dataTransfer.items?.[0];
-            const handle = item?.getAsFileSystemHandle ? await item.getAsFileSystemHandle() : null;
+            let handle = null;
+            try { handle = await item?.getAsFileSystemHandle?.(); } catch { /* use the plain file */ }
             const fileHandle = handle?.kind === "file" ? handle : null;
             const file = fileHandle ? await fileHandle.getFile() : dropped;
             if (file) onFile(file, fileHandle);
@@ -975,6 +984,14 @@ function MultiField({ mv, value, onChange, ...field }) {
 
 /** Any other column: a raw value that can also be NULL. */
 function PlainField({ name, value, onChange }) {
+  if (value instanceof Uint8Array) {
+    // Binary data cannot be edited as text without destroying it.
+    return html`
+      <div class="plain small">
+        <span title=${name} style="overflow:hidden;text-overflow:ellipsis">${name}</span>
+        <span class="muted">${`<${value.length} bytes>`}</span>
+      </div>`;
+  }
   const isNull = value === null;
   return html`
     <div class="plain small">

@@ -33,16 +33,16 @@ function cacheKey(request) {
 
 async function fromNetwork(request) {
   const res = await fetch(request);
-  if (res.ok) {
-    const cache = await caches.open(CACHE);
-    const key = cacheKey(request);
-    // Skip rewriting an unchanged copy (the page is ~2 MB).
-    if (!sameVersion(res, await cache.match(key))) await cache.put(key, res.clone());
-  }
+  const cache = await caches.open(CACHE);
+  const key = cacheKey(request);
+  const cached = await cache.match(key);
+  if (!res.ok) return cached ?? res; // an error page never replaces a good copy
+  // Skip rewriting an unchanged copy (the page is ~2 MB).
+  if (!sameVersion(res, cached)) await cache.put(key, res.clone());
   return res;
 }
 
-const fromCache = (request) => caches.match(cacheKey(request));
+const fromCache = async (request) => (await caches.match(cacheKey(request))) ?? Response.error();
 
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
