@@ -141,7 +141,7 @@ table.view th { position: sticky; top: 0; background: var(--bg-soft); }
 <noscript><p class="center">refill needs JavaScript.</p></noscript>
 
 <script type="module">
-const { html, render, useState, useEffect, useMemo, useRef } = window.htmPreact;
+const { html, render, useState, useEffect, useLayoutEffect, useMemo, useRef } = window.htmPreact;
 
 /* ==========================================================================
    Database: the official SQLite WebAssembly build (sqlite.org)
@@ -460,10 +460,14 @@ async function pickFile() {
   return { file: await handle.getFile(), handle };
 }
 
-async function writeToHandle(handle, bytes) {
+/** Asks for write access; needs to run right after the click, before any dialog. */
+async function ensureWritable(handle) {
   if (handle.requestPermission && (await handle.requestPermission({ mode: "readwrite" })) !== "granted") {
     throw new Error("Permission to write the file was denied");
   }
+}
+
+async function writeToHandle(handle, bytes) {
   const w = await handle.createWritable();
   try {
     await w.write(bytes);
@@ -488,7 +492,7 @@ function normalizeFormatUrl(input) {
   let url;
   try { url = new URL(input.trim()); } catch { throw new Error("Invalid URL"); }
   if (url.protocol !== "https:") throw new Error("URL must use https://");
-  if (url.hostname === "raw.githubusercontent.com") return url.href;
+  if (url.hostname === "raw.githubusercontent.com") return `https://raw.githubusercontent.com${url.pathname}`;
   if (url.hostname === "github.com") {
     const m = url.pathname.match(/^\/([^/]+)\/([^/]+)\/blob\/([^/]+)\/(.+)$/);
     if (!m) throw new Error("Not a GitHub file URL");
@@ -633,6 +637,7 @@ function App() {
   }, []);
 
   const save = guard(async () => {
+    if (doc.handle) await ensureWritable(doc.handle);
     if (!saveWithoutDraft()) return;
     const seen = version;
     const bytes = exportDatabase(doc.db, doc.header);
@@ -804,7 +809,7 @@ function NoteList({ db, table, version, selectedId, onSelect, onNew }) {
         ${notes.map((n) => {
           const l = noteLabel(n);
           return html`
-            <button class=${"item" + (n.id === selectedId ? " active" : "")} onClick=${() => onSelect(String(n.id))}>
+            <button class=${"item" + (n.id === selectedId ? " active" : "")} onClick=${() => onSelect(n.id)}>
               <div class=${"label" + (l.untitled ? " untitled" : "")}>${l.text}</div>
               <div class="small muted">${formatTime(n.updated_at)}</div>
             </button>`;
@@ -836,14 +841,16 @@ function NoteEditor({ db, nt, target, version, write, onSave, onDelete, onDirty,
   });
   const [form, setForm] = useState(initial);
   const update = (patch) => setForm((f) => ({ ...f, ...patch }));
-  const setProp = (c, v) => setForm((f) => ({ ...f, props: { ...f.props, [c]: v } }));
+  // `touched` tells an explicit NULL apart from a value never set (for DEFAULTs).
+  const setProp = (c, v) => setForm((f) => ({ ...f, props: { ...f.props, [c]: v }, touched: { ...f.touched, [c]: true } }));
   const setMulti = (t, ids) => setForm((f) => ({ ...f, multi: { ...f.multi, [t]: ids } }));
 
   const changedProps = propCols.filter((c) => form.props[c] !== initial.props[c]);
   const dirty = form.title !== initial.title || form.body !== initial.body || changedProps.length > 0 ||
     nt.multi.some((mv) => !sameSet(form.multi[mv.junctionTable], initial.multi[mv.junctionTable]));
-  useEffect(() => onDirty(dirty), [dirty]);
-  useEffect(() => () => onDirty(false), []);
+  // Reported before the browser paints, so App's discard prompts never miss an edit.
+  useLayoutEffect(() => onDirty(dirty), [dirty]);
+  useLayoutEffect(() => () => onDirty(false), []);
 
   function save() {
     const ts = now();
@@ -851,8 +858,8 @@ function NoteEditor({ db, nt, target, version, write, onSave, onDelete, onDirty,
     const title = form.title.trim() === "" ? null : form.title;
     if (target.kind === "new") {
       const data = { id: uuid(), title, body: form.body, created_at: ts, updated_at: ts };
-      // Omit unset extras so column defaults apply (Convention 5).
-      for (const c of propCols) if (form.props[c] !== null) data[c] = form.props[c];
+      // Omit extras the user never set, so column defaults apply (Convention 5).
+      for (const c of propCols) if (form.touched?.[c] || form.props[c] !== null) data[c] = form.props[c];
       onSave(data, form.multi);
     } else {
       // Only the columns the user changed, so untouched values stay exactly
@@ -868,7 +875,9 @@ function NoteEditor({ db, nt, target, version, write, onSave, onDelete, onDirty,
   // Ctrl/Cmd+S saves the open note wherever the focus is. An unchanged
   // note is left alone so its updated_at does not move.
   const saveRef = useRef(null);
-  saveRef.current = () => { if (dirty || target.kind === "new") save(); };
+  // An unchanged note is not saved, so its updated_at does not move.
+  const saveIfChanged = () => { if (dirty || target.kind === "new") save(); };
+  saveRef.current = saveIfChanged;
   useEffect(() => {
     const onKey = (e) => {
       if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "s") {
@@ -885,7 +894,7 @@ function NoteEditor({ db, nt, target, version, write, onSave, onDelete, onDirty,
     <div class="pane-head">
       <input class="title-input" placeholder="Title (optional)" value=${form.title}
         onInput=${(e) => update({ title: e.target.value })} />
-      <button class="primary" onClick=${save}>Save</button>
+      <button class="primary" onClick=${saveIfChanged}>Save</button>
       ${target.kind === "edit" && html`
         <button class="danger" onClick=${() => confirm("Delete this note? This cannot be undone.") && onDelete()}>Delete</button>`}
     </div>

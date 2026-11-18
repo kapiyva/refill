@@ -31,21 +31,24 @@ function cacheKey(request) {
   return url.href;
 }
 
-async function fromNetwork(request) {
-  const res = await fetch(request);
+const fromCache = async (request) => (await caches.match(cacheKey(request))) ?? Response.error();
+
+/** Keeps the cache up to date in the background; failures here never affect the response. */
+async function remember(request, res) {
   const cache = await caches.open(CACHE);
   const key = cacheKey(request);
-  const cached = await cache.match(key);
-  if (!res.ok) return cached ?? res; // an error page never replaces a good copy
   // Skip rewriting an unchanged copy (the page is ~2 MB).
-  if (!sameVersion(res, cached)) await cache.put(key, res.clone());
-  return res;
+  if (!sameVersion(res, await cache.match(key))) await cache.put(key, res);
 }
-
-const fromCache = async (request) => (await caches.match(cacheKey(request))) ?? Response.error();
 
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== location.origin) return;
-  e.respondWith(fromNetwork(e.request).catch(() => fromCache(e.request)));
+  e.respondWith((async () => {
+    let res;
+    try { res = await fetch(e.request); } catch { return fromCache(e.request); }
+    if (!res.ok) return (await caches.match(cacheKey(e.request))) ?? res; // an error page never replaces a good copy
+    e.waitUntil(remember(e.request, res.clone()).catch(() => {}));
+    return res;
+  })());
 });
