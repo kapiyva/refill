@@ -9,7 +9,7 @@
     "vendor": "node scripts/vendor.mjs"
   },
   "devDependencies": {
-    "htm": "3.1.1",
-    "sql.js": "1.16.0"
+    "@sqlite.org/sqlite-wasm": "3.54.1-build1",
+    "htm": "3.1.1"
   }
 }

@@ -9,7 +9,7 @@ note.sql フォーマットに準拠した SQLite ファイルを読み込み、
 ## 技術方針
 
 - 単一の HTML ファイル（`refill.html`）がプログラムのすべて。ビルド工程を持たない
-- 依存ライブラリ（sql.js、htm + Preact）は HTML 末尾に埋め込み、実行時に外部から読み込まない。`file://` で開いても動くこと
+- 依存ライブラリ（SQLite 公式の sqlite-wasm、htm + Preact）は HTML 末尾に無改変で埋め込み、実行時に外部から読み込まない。`file://` で開いても動くこと
 - 静的配信（GitHub Pages 等）でも同じファイルを配信し、PWA としてインストール・オフライン利用できる
 - 保存は File System Access API があれば開いたファイルへ書き戻し、なければダウンロード
 

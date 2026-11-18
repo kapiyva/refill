@@ -10,7 +10,7 @@ refill reads and writes any SQLite file that follows the note.sql conventions, e
 Its purpose is to guarantee that a note.sql file can always be opened, read and edited, anywhere.
 
 - **One file** — [`refill.html`](refill.html) is the whole program. No build step, no install, no server.
-- **Works offline, even from disk** — sql.js (SQLite compiled to WebAssembly) and Preact are embedded. Nothing is fetched, and nothing leaves the page.
+- **Works offline, even from disk** — The official SQLite WebAssembly build and Preact are embedded. Nothing is fetched, and nothing leaves the page.
 - **Format-agnostic** — Works with any note.sql–conforming format, from the schema alone. No format-specific code.
 - **A reference implementation** — Plain code, meant to show how the note.sql conventions translate into a working tool.
 
@@ -29,7 +29,7 @@ Saving writes back to the opened file on Chromium-based browsers (File System Ac
 - Notes: list, read, write, create, delete. `title` is optional; untitled notes are listed by their first body line
 - Properties per Convention 4: single-value references as a label picker, multi-value references (junction tables) as label toggles, and adding new labels to a vocabulary. Other columns are edited as raw values, NULL included
 - Read-only display of views
-- WAL-mode files are opened and saved without changing their journal mode
+- WAL-mode files are opened and saved without changing their journal mode. They are always saved as a download, never over the original, because a `-wal` file next to it could otherwise be replayed onto the new contents
 
 ## Development
 
@@ -52,7 +52,7 @@ sqlite3 fixtures/test.db < fixtures/seed.sql
 
 ## Embedded libraries
 
-- [sql.js](https://github.com/sql-js/sql.js) — SQLite as WebAssembly (MIT)
+- [@sqlite.org/sqlite-wasm](https://sqlite.org/wasm) — the official SQLite WebAssembly build, embedded unmodified (Apache-2.0 wrapper; SQLite itself is public domain)
 - [htm](https://github.com/developit/htm) with [Preact](https://preactjs.com/) — UI without a build step (Apache-2.0 / MIT)
 
 ## License

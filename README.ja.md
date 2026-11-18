@@ -10,7 +10,7 @@ refill は note.sql 規約に準拠した SQLite ファイルをブラウザ内�
 目的は、note.sql のファイルがいつでもどこでも開けて、読めて、編集できることを保証することです。
 
 - **1ファイル** — [`refill.html`](refill.html) がプログラムのすべてです。ビルドもインストールもサーバーも不要です
-- **オフラインで動き、手元のファイルから直接開ける** — sql.js（WebAssembly 版 SQLite）と Preact を埋め込んであります。外部からの読み込みも、外部への送信もしません
+- **オフラインで動き、手元のファイルから直接開ける** — 公式の SQLite WebAssembly ビルドと Preact を埋め込んであります。外部からの読み込みも、外部への送信もしません
 - **フォーマット非依存** — スキーマだけを手がかりに、note.sql 準拠の任意のフォーマットで動きます
 - **リファレンス実装** — note.sql 規約がどう動くツールになるかを示す、素直なコードです
 
@@ -29,7 +29,7 @@ refill は note.sql 規約に準拠した SQLite ファイルをブラウザ内�
 - ノートの一覧・閲覧・編集・作成・削除。`title` は任意で、無題のノートは本文の先頭行で一覧表示
 - 規約 4 のプロパティ編集: 単一値の参照はラベル選択、多値の参照（中間テーブル）はラベルのトグル、語彙へのラベル追加。それ以外のカラムは NULL を含めて生の値として編集
 - ビューの読み取り専用表示
-- WAL モードのファイルも、ジャーナルモードを変えずに開いて保存
+- WAL モードのファイルも、ジャーナルモードを変えずに開いて保存。隣にある `-wal` ファイルが新しい内容に再適用されるのを防ぐため、元のファイルへは書き戻さず常にダウンロードで保存
 
 ## 開発
 
@@ -52,7 +52,7 @@ sqlite3 fixtures/test.db < fixtures/seed.sql
 
 ## 埋め込みライブラリ
 
-- [sql.js](https://github.com/sql-js/sql.js) — WebAssembly 版 SQLite（MIT）
+- [@sqlite.org/sqlite-wasm](https://sqlite.org/wasm) — SQLite 公式の WebAssembly ビルド。無改変で埋め込み（ラッパーは Apache-2.0、SQLite 本体はパブリックドメイン）
 - [htm](https://github.com/developit/htm) と [Preact](https://preactjs.com/) — ビルドなしの UI（Apache-2.0 / MIT）
 
 ## ライセンス
