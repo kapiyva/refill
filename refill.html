@@ -119,6 +119,7 @@ table.view { border-collapse: collapse; font-size: 13px; }
 table.view th, table.view td { border-bottom: 1px solid var(--line); padding: 4px 8px; text-align: left; vertical-align: top; white-space: pre-wrap; }
 table.view th { position: sticky; top: 0; background: var(--bg-soft); }
 .null { color: var(--fg-soft); font-style: italic; }
+.error { color: var(--danger); }
 
 .toast {
   position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); max-width: calc(100% - 32px);
@@ -140,40 +141,52 @@ table.view th { position: sticky; top: 0; background: var(--bg-soft); }
 <noscript><p class="center">refill needs JavaScript.</p></noscript>
 
 <script type="module">
-const { html, render, useState, useEffect, useMemo, useRef, useCallback } = window.htmPreact;
+const { html, render, useState, useEffect, useMemo, useRef } = window.htmPreact;
 
 /* ==========================================================================
    Database: the official SQLite WebAssembly build (sqlite.org)
    ========================================================================== */
 
 // The vendor block holds sqlite-wasm's ES module verbatim. It is loaded
-// through a Blob URL, and the WebAssembly bytes are handed over with the
-// Emscripten `instantiateWasm` hook, so nothing is fetched by URL. That is
-// what lets this page run from file://.
+// through a Blob URL, and the WebAssembly is handed over with the Emscripten
+// `instantiateWasm` hook, so nothing is fetched by URL. That is what lets
+// this page run from file://.
+let sqlite3 = null; // the SQLite API, once started
 let sqlitePromise = null;
+
+function decodeBase64(b64) {
+  if (Uint8Array.fromBase64) return Uint8Array.fromBase64(b64.trim());
+  const bin = atob(b64.trim());
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
 function initSqlite() {
   if (!sqlitePromise) {
     sqlitePromise = (async () => {
+      // Compile the WebAssembly while the JS module is being imported.
+      const compiled = WebAssembly.compile(decodeBase64(document.getElementById("sqlite3-wasm").textContent));
+      compiled.catch(() => {}); // reported through instantiateWasm below
       const source = document.getElementById("sqlite3-module").textContent;
       const url = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
       const { default: sqlite3InitModule } = await import(url);
       URL.revokeObjectURL(url);
-      const b64 = document.getElementById("sqlite3-wasm").textContent.trim();
-      const wasm = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-      // `done` only reports success, so a failed instantiation is surfaced
-      // by racing it against the module's own promise.
+      // `done` only reports success, so a failure is surfaced by racing it
+      // against the module's own promise.
       let failed;
       const failure = new Promise((_, reject) => { failed = reject; });
-      return Promise.race([failure, sqlite3InitModule({
+      sqlite3 = await Promise.race([failure, sqlite3InitModule({
         print: () => {},
         printErr: (...args) => console.warn(...args),
         instantiateWasm(imports, done) {
-          WebAssembly.instantiate(wasm, imports)
-            .then((r) => done(r.instance, r.module))
+          compiled
+            .then((module) => WebAssembly.instantiate(module, imports).then((instance) => done(instance, module)))
             .catch((e) => failed(new Error(`Could not start SQLite: ${errorText(e)}`)));
           return {};
         },
       })]);
+      return sqlite3;
     })();
     sqlitePromise.catch(() => { sqlitePromise = null; }); // allow a retry
   }
@@ -194,9 +207,9 @@ function isSqliteFile(bytes) {
 }
 
 async function openDatabase(bytes) {
-  const sqlite3 = await initSqlite();
+  await initSqlite();
   const db = new sqlite3.oo1.DB(":memory:", "c");
-  if (!bytes || bytes.length === 0) return { db, header: null, wal: false };
+  if (!bytes || bytes.length === 0) return { db, header: null };
 
   const header = [bytes[HEADER_WRITE], bytes[HEADER_READ]];
   if (bytes[HEADER_WRITE] === 2) bytes[HEADER_WRITE] = 1;
@@ -210,11 +223,12 @@ async function openDatabase(bytes) {
     db.close();
     throw new Error(`Could not open the database (sqlite3_deserialize rc=${rc})`);
   }
-  return { db, header, wal: header.includes(2) };
+  return { db, header };
 }
 
-async function exportDatabase(db, header) {
-  const sqlite3 = await initSqlite();
+const isWal = (header) => header?.includes(2) ?? false;
+
+function exportDatabase(db, header) {
   const bytes = sqlite3.capi.sqlite3_js_db_export(db);
   if (header) {
     bytes[HEADER_WRITE] = header[0];
@@ -237,7 +251,30 @@ function inTransaction(db, fn) {
     db.exec("COMMIT");
     return result;
   } catch (e) {
-    try { db.exec("ROLLBACK"); } catch { /* surface the original error */ }
+    rollbackIfOpen(db);
+    throw e;
+  }
+}
+
+function rollbackIfOpen(db) {
+  if (!sqlite3.capi.sqlite3_get_autocommit(db)) db.exec("ROLLBACK");
+}
+
+/**
+ * Applies a format.sql atomically. A script that runs its own BEGIN ...
+ * COMMIT cannot be nested in ours, so that one is run as it is.
+ */
+function applyFormat(db, sql) {
+  try {
+    inTransaction(db, () => db.exec(sql));
+    return;
+  } catch (e) {
+    if (!/within a transaction/i.test(errorText(e))) throw e;
+  }
+  try {
+    db.exec(sql);
+  } catch (e) {
+    rollbackIfOpen(db);
     throw e;
   }
 }
@@ -349,7 +386,7 @@ function noteLabel(n) {
   return { text: line ?? "(empty)", untitled: true };
 }
 
-const getNote = (db, table, id) => all(db, `SELECT * FROM ${q(table)} WHERE id = ?`, [id])[0] ?? null;
+const getNote = (db, table, id) => db.selectObject(`SELECT * FROM ${q(table)} WHERE id = ?`, bindable([id])) ?? null;
 
 const listOptions = (db, table) =>
   all(db, `SELECT id, label FROM ${q(table)} ORDER BY label, id`).map((r) => ({ id: String(r.id), label: String(r.label ?? "") }));
@@ -408,7 +445,8 @@ function deleteNote(db, nt, id) {
    ========================================================================== */
 
 const canPick = "showOpenFilePicker" in window;
-const SQLITE_TYPES = { "application/x-sqlite3": [".db", ".sqlite", ".sqlite3"] };
+const SQLITE_MIME = "application/x-sqlite3";
+const SQLITE_TYPES = { [SQLITE_MIME]: [".db", ".sqlite", ".sqlite3"] };
 
 async function pickFile() {
   const [handle] = await window.showOpenFilePicker({
@@ -432,7 +470,7 @@ async function writeToHandle(handle, bytes) {
 }
 
 function download(bytes, name) {
-  const url = URL.createObjectURL(new Blob([bytes], { type: "application/x-sqlite3" }));
+  const url = URL.createObjectURL(new Blob([bytes], { type: SQLITE_MIME }));
   const a = document.createElement("a");
   a.href = url;
   a.download = /\.(db|sqlite3?)$/i.test(name) ? name : "notes.db";
@@ -467,33 +505,56 @@ const errorText = (e) => (e instanceof Error ? e.message : String(e));
    UI
    ========================================================================== */
 
+/** Keeps a selection whose table or view still exists; otherwise the first note table. */
+function resolveSel(cur, inspection) {
+  const exists = cur && (cur.view
+    ? inspection.views.includes(cur.view)
+    : inspection.noteTables.some((t) => t.name === cur.table));
+  return exists ? cur : { table: inspection.noteTables[0]?.name ?? null, view: null, record: null };
+}
+
 function App() {
   const [doc, setDoc] = useState(null); // { db, name, handle, header, inspection }
-  const [modified, setModified] = useState(false); // db differs from the file on disk
-  const [tick, setTick] = useState(0); // bumps after notes change
-  const [sel, setSel] = useState({ table: null, view: null, record: null });
-  const [formDirty, setFormDirty] = useState(false);
-  const [epoch, setEpoch] = useState(0); // remounts the editor on every selection
-  // Counts changes to the database, so a save that finishes after newer
-  // changes does not mark them as saved.
-  const changes = useRef(0);
-  const markModified = () => { changes.current += 1; setModified(true); };
+  // `version` counts writes to the open database; `savedVersion` is the one
+  // last written to disk. The file is modified while they differ.
+  const [version, setVersion] = useState(0);
+  const [savedVersion, setSavedVersion] = useState(0);
+  const modified = doc !== null && version !== savedVersion;
+  // Every selection change starts a new `session`, which remounts the editor.
+  const [sel, setSel] = useState({ table: null, view: null, record: null, session: 0 });
+  const [formDirty, setFormDirty] = useState(false); // reported by the editor
   const [error, setError] = useState(null);
-  // Code that runs after an await (opening a file, fetching a format) reads
-  // the current document through this ref, not the possibly stale `doc`.
-  const docRef = useRef(null);
-  docRef.current = doc;
+
+  // Handlers that run after an await, or that outlive a render (the PWA
+  // launch consumer), read current values from here.
+  const live = useRef({});
+
+  const setSelection = (next) =>
+    setSel((cur) => ({ ...(typeof next === "function" ? next(cur) : next), session: cur.session + 1 }));
+  /** Every write to the database goes through here. */
+  const write = (fn) => {
+    try { return fn(); } finally { setVersion((v) => v + 1); }
+  };
+  /** Swaps in another document (or none) and records whether it matches the disk. */
+  function replaceDoc(next, { saved }) {
+    live.current.doc?.db.close();
+    setDoc(next);
+    if (next) setSelection(resolveSel(null, next.inspection));
+    const v = live.current.version + 1;
+    setVersion(v);
+    setSavedVersion(saved ? v : v - 1);
+  }
 
   const guard = (fn) => async (...args) => {
     setError(null);
     try { await fn(...args); } catch (e) { if (e?.name !== "AbortError") setError(errorText(e)); }
   };
-  const discardForm = () => !formDirty || confirm("Discard unsaved changes to this note?");
+  const discardForm = () => !live.current.formDirty || confirm("Discard unsaved changes to this note?");
   // Saving the file writes what the database holds; an unsaved note draft
   // stays in the editor and is not part of it.
-  const saveWithoutDraft = () =>
-    !formDirty || confirm("The open note has edits that are not saved to the note yet. Save the file without them?");
-  const discardDoc = () => !modified || confirm("This file has changes that are not saved to disk. Discard them?");
+  const saveWithoutDraft = () => !live.current.formDirty ||
+    confirm("The open note has edits that are not saved to the note yet. Save the file without them?");
+  const discardDoc = () => !live.current.modified || confirm("This file has changes that are not saved to disk. Discard them?");
 
   useEffect(() => {
     const warn = (e) => { if (modified || formDirty) { e.preventDefault(); e.returnValue = ""; } };
@@ -501,68 +562,40 @@ function App() {
     return () => removeEventListener("beforeunload", warn);
   }, [modified, formDirty]);
 
-  function show(next) {
-    const first = next.inspection.noteTables[0]?.name ?? null;
-    setDoc(next);
-    setSel({ table: first, view: null, record: null });
-    setFormDirty(false);
-  }
-
-  function applyFormat(db, sql) {
-    try {
-      inTransaction(db, () => db.exec(sql));
-    } catch (e) {
-      // A format.sql that manages its own transaction (BEGIN ... COMMIT)
-      // cannot be nested; run it as is.
-      if (!/within a transaction/i.test(errorText(e))) throw e;
-      try { db.exec(sql); } catch (e2) {
-        try { db.exec("ROLLBACK"); } catch { /* not in a transaction */ }
-        throw e2;
-      }
-    }
-  }
-
   const openFile = guard(async (file, handle = null) => {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    // An empty .sql file is an empty format, not an empty database.
+    // Not a database (an empty .sql file included): a format.sql to apply.
     if (!isSqliteFile(bytes) || (bytes.length === 0 && /\.sql$/i.test(file.name))) {
-      // Not a database: treat it as a format.sql to apply.
       return applySql(new TextDecoder().decode(bytes), file.name);
     }
     if (!discardForm() || !discardDoc()) return;
-    const { db, header, wal } = await openDatabase(bytes);
+    const { db, header } = await openDatabase(bytes);
     let inspection;
     try { inspection = inspect(db); } catch (e) { db.close(); throw e; }
-    docRef.current?.db.close();
     // A WAL-mode file may have a -wal file next to it that this page cannot
     // see. Writing over the database would let SQLite replay stale frames
     // onto it later, so WAL files are only ever saved as a download.
-    show({ db, name: file.name, handle: wal ? null : handle, header, wal, inspection });
-    setModified(false);
+    replaceDoc({ db, name: file.name, handle: isWal(header) ? null : handle, header, inspection }, { saved: true });
   });
 
   async function applySql(sql, sourceName) {
     if (sql.trim() === "") throw new Error(`${sourceName} is empty`);
-    const doc = docRef.current;
+    const doc = live.current.doc;
     if (doc) {
       if (!discardForm() || !confirm(`Apply ${sourceName} to ${doc.name}?`)) return;
-      applyFormat(doc.db, sql);
-      const inspection = inspect(doc.db);
-      setDoc({ ...doc, inspection });
-      // The format may have dropped or replaced the selected table or view.
-      setSel((cur) =>
-        (cur.table && !inspection.noteTables.some((t) => t.name === cur.table)) ||
-        (cur.view && !inspection.views.includes(cur.view))
-          ? { table: inspection.noteTables[0]?.name ?? null, view: null, record: null }
-          : cur);
-      setFormDirty(false); // the draft was discarded above
-      markModified();
-      setTick((n) => n + 1);
+      try {
+        write(() => applyFormat(doc.db, sql));
+      } finally {
+        // The format may have added, dropped or replaced tables and views.
+        const inspection = inspect(doc.db);
+        setDoc({ ...doc, inspection });
+        setSelection((cur) => resolveSel(cur, inspection));
+      }
     } else {
       const { db } = await openDatabase(null);
-      try { applyFormat(db, sql); } catch (e) { db.close(); throw e; }
-      show({ db, name: "notes.db", handle: null, header: null, inspection: inspect(db) });
-      markModified();
+      let inspection;
+      try { applyFormat(db, sql); inspection = inspect(db); } catch (e) { db.close(); throw e; }
+      replaceDoc({ db, name: "notes.db", handle: null, header: null, inspection }, { saved: false });
     }
   }
 
@@ -576,69 +609,50 @@ function App() {
     await openFile(file, handle);
   });
 
-  // Installed as an app (PWA): files opened from the OS arrive here. The
-  // consumer is registered once, so it calls the latest openFile via a ref.
-  const openFileRef = useRef(openFile);
-  openFileRef.current = openFile;
+  live.current = { doc, version, modified, formDirty, openFile };
+
+  // Installed as an app (PWA): files opened from the OS arrive here.
   useEffect(() => {
     if (!("launchQueue" in window)) return;
     window.launchQueue.setConsumer(async (params) => {
       const handle = params.files?.[0];
-      if (handle) openFileRef.current(await handle.getFile(), handle);
+      if (handle) live.current.openFile(await handle.getFile(), handle);
     });
   }, []);
 
   const save = guard(async () => {
     if (!saveWithoutDraft()) return;
-    const seen = changes.current;
-    const bytes = await exportDatabase(doc.db, doc.header);
+    const seen = version;
+    const bytes = exportDatabase(doc.db, doc.header);
     if (doc.handle) await writeToHandle(doc.handle, bytes);
     else download(bytes, doc.name);
-    if (changes.current === seen) setModified(false);
+    setSavedVersion(seen); // writes made during the await stay unsaved
   });
 
   const saveCopy = guard(async () => {
     if (!saveWithoutDraft()) return;
-    download(await exportDatabase(doc.db, doc.header), doc.name);
+    download(exportDatabase(doc.db, doc.header), doc.name);
   });
 
   function close() {
-    if (!discardForm() || !discardDoc()) return;
-    doc.db.close();
-    setDoc(null);
-    setModified(false);
-    setFormDirty(false);
+    if (discardForm() && discardDoc()) replaceDoc(null, { saved: true });
   }
 
-  const select = (next) => {
-    if (!discardForm()) return;
-    setSel(next);
-    setFormDirty(false);
-    setEpoch((n) => n + 1);
-  };
+  const select = (next) => { if (discardForm()) setSelection(next); };
 
-  if (!doc) {
-    return html`
-      <${Opener} onPick=${pick} onFile=${openFile} onUrl=${applyUrl} />
-      ${error && html`<div class="toast" onClick=${() => setError(null)}>${error}</div>`}`;
-  }
+  const toast = error && html`<div class="toast" onClick=${() => setError(null)}>${error}</div>`;
+  if (!doc) return html`<${Opener} onPick=${pick} onFile=${openFile} onUrl=${applyUrl} />${toast}`;
 
   const nt = doc.inspection.noteTables.find((t) => t.name === sel.table) ?? null;
 
   const onSaveNote = guard((data, multi) => {
-    const id = saveNote(doc.db, nt, sel.record, data, multi);
-    markModified();
-    setFormDirty(false);
-    setTick((n) => n + 1);
-    setSel({ ...sel, record: { kind: "edit", id } });
+    const id = write(() => saveNote(doc.db, nt, sel.record, data, multi));
+    setSelection({ ...sel, record: { kind: "edit", id } });
   });
 
   const onDeleteNote = guard(() => {
-    deleteNote(doc.db, nt, sel.record.id);
-    markModified();
-    setFormDirty(false);
-    setTick((n) => n + 1);
-    setSel({ ...sel, record: null });
+    write(() => deleteNote(doc.db, nt, sel.record.id));
+    setSelection({ ...sel, record: null });
   });
 
   return html`
@@ -648,30 +662,36 @@ function App() {
         onSelect=${select} onSave=${save} onSaveCopy=${saveCopy} onClose=${close}
         onPick=${pick} onFile=${openFile} onUrl=${applyUrl} />
       ${sel.view
-        ? html`<div class="pane view-pane"><${ViewTable} db=${doc.db} name=${sel.view} tick=${tick} /></div>`
+        ? html`<div class="pane view-pane"><${ViewTable} db=${doc.db} name=${sel.view} version=${version} /></div>`
         : html`
           <${NoteList}
-            db=${doc.db} table=${sel.table} tick=${tick}
+            db=${doc.db} table=${sel.table} version=${version}
             selectedId=${sel.record?.kind === "edit" ? sel.record.id : null}
             onSelect=${(id) => select({ ...sel, record: { kind: "edit", id } })}
             onNew=${() => select({ ...sel, record: { kind: "new" } })} />
           <div class="pane">
             ${nt && sel.record
-              ? html`<${NoteEditor}
-                  key=${`${nt.name}:${sel.record.kind === "edit" ? sel.record.id : "new"}:${tick}:${epoch}`}
-                  db=${doc.db} nt=${nt} target=${sel.record}
-                  onSave=${onSaveNote} onDelete=${onDeleteNote}
-                  onDirty=${setFormDirty} onModified=${markModified} onError=${setError} />`
+              ? html`<${NoteEditor} key=${sel.session}
+                  db=${doc.db} nt=${nt} target=${sel.record} version=${version} write=${write}
+                  onSave=${onSaveNote} onDelete=${onDeleteNote} onDirty=${setFormDirty} onError=${setError} />`
               : html`<p class="center muted">${sel.table ? "Select a note or create a new one" : ""}</p>`}
           </div>`}
     </div>
-    ${error && html`<div class="toast" onClick=${() => setError(null)}>${error}</div>`}`;
+    ${toast}`;
+}
+
+/** A button that opens a file: the picker when available, else a file input. */
+function OpenFileButton({ class: className, onPick, onFile, children }) {
+  const input = useRef(null);
+  return html`
+    <button class=${className} onClick=${() => (canPick ? onPick() : input.current.click())}>${children}</button>
+    <input ref=${input} type="file" hidden
+      onChange=${(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) onFile(f); }} />`;
 }
 
 function Opener({ onPick, onFile, onUrl }) {
   const [over, setOver] = useState(false);
   const [url, setUrl] = useState("");
-  const input = useRef(null);
   return html`
     <div class="center">
       <div class="opener">
@@ -691,13 +711,12 @@ function Opener({ onPick, onFile, onUrl }) {
             const dropped = e.dataTransfer.files[0];
             const item = e.dataTransfer.items?.[0];
             const handle = item?.getAsFileSystemHandle ? await item.getAsFileSystemHandle() : null;
-            const file = handle?.kind === "file" ? await handle.getFile() : dropped;
-            if (file) onFile(file, handle?.kind === "file" ? handle : null);
+            const fileHandle = handle?.kind === "file" ? handle : null;
+            const file = fileHandle ? await fileHandle.getFile() : dropped;
+            if (file) onFile(file, fileHandle);
           }}>
           <p style="margin:0 0 10px">Drop a SQLite file here</p>
-          <button class="primary" onClick=${() => (canPick ? onPick() : input.current.click())}>Open file…</button>
-          <input ref=${input} type="file" hidden
-            onChange=${(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) onFile(f); }} />
+          <${OpenFileButton} class="primary" onPick=${onPick} onFile=${onFile}>Open file…<//>
         </div>
         <div>
           <p class="small muted" style="margin:0 0 4px">
@@ -717,7 +736,6 @@ function Opener({ onPick, onFile, onUrl }) {
 }
 
 function Sidebar({ doc, sel, modified, onSelect, onSave, onSaveCopy, onClose, onPick, onFile, onUrl }) {
-  const input = useRef(null);
   const { noteTables, views } = doc.inspection;
   const applyFromUrl = () => {
     const url = prompt("GitHub URL of a format.sql to apply to this file:");
@@ -744,21 +762,19 @@ function Sidebar({ doc, sel, modified, onSelect, onSave, onSaveCopy, onClose, on
       <div class="side-foot">
         <button class="primary" onClick=${onSave}>${doc.handle ? "Save" : "Download"}</button>
         ${doc.handle && html`<button onClick=${onSaveCopy}>Download a copy</button>`}
-        ${doc.wal && html`<p class="small muted" style="margin:0">WAL-mode file: saved as a download, never over the original.</p>`}
-        <button class="link small" onClick=${() => (canPick ? onPick() : input.current.click())}>Open another file / apply format.sql…</button>
+        ${isWal(doc.header) && html`<p class="small muted" style="margin:0">WAL-mode file: saved as a download, never over the original.</p>`}
+        <${OpenFileButton} class="link small" onPick=${onPick} onFile=${onFile}>Open another file / apply format.sql…<//>
         <button class="link small" onClick=${applyFromUrl}>Apply format from URL…</button>
-        <input ref=${input} type="file" hidden
-          onChange=${(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) onFile(f); }} />
       </div>
     </div>`;
 }
 
-function NoteList({ db, table, tick, selectedId, onSelect, onNew }) {
+function NoteList({ db, table, version, selectedId, onSelect, onNew }) {
   const result = useMemo(() => {
     try { return { notes: table ? listNotes(db, table) : [] }; } catch (e) { return { error: errorText(e) }; }
-  }, [db, table, tick]);
+  }, [db, table, version]);
   if (!table) return html`<div class="pane"><p class="center muted">Select a note table</p></div>`;
-  if (result.error) return html`<div class="pane"><p class="center" style="color:var(--danger)">${result.error}</p></div>`;
+  if (result.error) return html`<div class="pane"><p class="center error">${result.error}</p></div>`;
   const { notes } = result;
   return html`
     <div class="pane list">
@@ -787,35 +803,32 @@ function formatTime(s) {
   return Number.isNaN(d.getTime()) ? String(s ?? "") : d.toLocaleString();
 }
 
-function NoteEditor({ db, nt, target, onSave, onDelete, onDirty, onModified, onError }) {
-  const singleCols = useMemo(() => new Set(nt.single.map((p) => p.column)), [nt]);
+function NoteEditor({ db, nt, target, version, write, onSave, onDelete, onDirty, onError }) {
+  const singleCols = new Set(nt.single.map((p) => p.column));
   // Columns note.sql does not define and that are not property references.
-  const plainCols = useMemo(
-    () => nt.columns.map((c) => c.name).filter((c) => !NOTE_COLUMNS.includes(c) && !singleCols.has(c)),
-    [nt, singleCols]);
-  const propCols = useMemo(() => [...plainCols, ...singleCols], [plainCols, singleCols]);
+  const plainCols = nt.columns.map((c) => c.name).filter((c) => !NOTE_COLUMNS.includes(c) && !singleCols.has(c));
+  const propCols = [...plainCols, ...singleCols];
 
-  const initial = useMemo(() => {
+  // Read once: App remounts the editor (new selection session) whenever it
+  // should start over from the database.
+  const [initial] = useState(() => {
     const rec = target.kind === "edit" ? getNote(db, nt.name, target.id) : null;
     const props = {};
-    for (const c of propCols) props[c] = rec ? (rec[c] ?? null) : null;
+    for (const c of propCols) props[c] = rec?.[c] ?? null;
     const multi = {};
     for (const mv of nt.multi) multi[mv.junctionTable] = rec ? selectedIds(db, mv, target.id) : [];
-    return { title: rec ? String(rec.title ?? "") : "", body: rec ? String(rec.body ?? "") : "", props, multi };
-  }, []);
+    return { title: String(rec?.title ?? ""), body: String(rec?.body ?? ""), props, multi };
+  });
   const [form, setForm] = useState(initial);
-  // Bumped when a label is added, so every field re-reads its vocabulary
-  // (two fields can share one property table).
-  const [vocab, setVocab] = useState(0);
-  const onLabelAdded = () => { setVocab((n) => n + 1); onModified(); };
   const update = (patch) => setForm((f) => ({ ...f, ...patch }));
+  const setProp = (c, v) => setForm((f) => ({ ...f, props: { ...f.props, [c]: v } }));
+  const setMulti = (t, ids) => setForm((f) => ({ ...f, multi: { ...f.multi, [t]: ids } }));
 
-  const dirty = useMemo(() =>
-    form.title !== initial.title || form.body !== initial.body ||
-    propCols.some((c) => (form.props[c] ?? null) !== (initial.props[c] ?? null)) ||
-    nt.multi.some((mv) => !sameSet(form.multi[mv.junctionTable], initial.multi[mv.junctionTable])),
-  [form]);
+  const changedProps = propCols.filter((c) => form.props[c] !== initial.props[c]);
+  const dirty = form.title !== initial.title || form.body !== initial.body || changedProps.length > 0 ||
+    nt.multi.some((mv) => !sameSet(form.multi[mv.junctionTable], initial.multi[mv.junctionTable]));
   useEffect(() => onDirty(dirty), [dirty]);
+  useEffect(() => () => onDirty(false), []);
 
   function save() {
     const ts = now();
@@ -824,22 +837,20 @@ function NoteEditor({ db, nt, target, onSave, onDelete, onDirty, onModified, onE
     if (target.kind === "new") {
       const data = { id: uuid(), title, body: form.body, created_at: ts, updated_at: ts };
       // Omit unset extras so column defaults apply (Convention 5).
-      for (const c of propCols) if (form.props[c] !== null && form.props[c] !== undefined) data[c] = form.props[c];
+      for (const c of propCols) if (form.props[c] !== null) data[c] = form.props[c];
       onSave(data, form.multi);
     } else {
+      // Only the columns the user changed, so untouched values stay exactly
+      // as stored (type and representation included).
       const data = { title, body: form.body, updated_at: ts };
-      // Only columns the user changed, so untouched values stay exactly as
-      // stored (type and representation included).
-      for (const c of propCols) {
-        if ((form.props[c] ?? null) !== (initial.props[c] ?? null)) data[c] = form.props[c] ?? null;
-      }
+      for (const c of changedProps) data[c] = form.props[c];
       onSave(data, form.multi);
     }
   }
 
   // Ctrl/Cmd+S saves the open note wherever the focus is. An unchanged
   // note is left alone so its updated_at does not move.
-  const saveRef = useRef(save);
+  const saveRef = useRef(null);
   saveRef.current = () => { if (dirty || target.kind === "new") save(); };
   useEffect(() => {
     const onKey = (e) => {
@@ -852,8 +863,7 @@ function NoteEditor({ db, nt, target, onSave, onDelete, onDirty, onModified, onE
     return () => removeEventListener("keydown", onKey);
   }, []);
 
-  const hasProps = plainCols.length > 0 || nt.single.length > 0 || nt.multi.length > 0;
-
+  const field = { db, version, write, onError };
   return html`
     <div class="pane-head">
       <input class="title-input" placeholder="Title (optional)" value=${form.title}
@@ -865,22 +875,19 @@ function NoteEditor({ db, nt, target, onSave, onDelete, onDirty, onModified, onE
     <div class="detail">
       <textarea placeholder="Write here…" value=${form.body}
         onInput=${(e) => update({ body: e.target.value })} />
-      ${hasProps && html`
+      ${(propCols.length > 0 || nt.multi.length > 0) && html`
         <div class="props">
           ${nt.single.map((p) => html`
-            <${SingleField} key=${p.column} db=${db} p=${p}
-              value=${form.props[p.column] === null || form.props[p.column] === undefined ? null : String(form.props[p.column])}
+            <${SingleField} key=${p.column} ...${field} p=${p}
+              value=${form.props[p.column] === null ? null : String(form.props[p.column])}
               allowEmpty=${p.nullable || (target.kind === "new" && p.hasDefault)}
-              onChange=${(v) => setForm((f) => ({ ...f, props: { ...f.props, [p.column]: v } }))}
-              vocab=${vocab} onLabelAdded=${onLabelAdded} onError=${onError} />`)}
+              onChange=${(v) => setProp(p.column, v)} />`)}
           ${nt.multi.map((mv) => html`
-            <${MultiField} key=${mv.junctionTable} db=${db} mv=${mv}
-              value=${form.multi[mv.junctionTable] ?? []}
-              onChange=${(ids) => setForm((f) => ({ ...f, multi: { ...f.multi, [mv.junctionTable]: ids } }))}
-              vocab=${vocab} onLabelAdded=${onLabelAdded} onError=${onError} />`)}
+            <${MultiField} key=${mv.junctionTable} ...${field} mv=${mv}
+              value=${form.multi[mv.junctionTable]}
+              onChange=${(ids) => setMulti(mv.junctionTable, ids)} />`)}
           ${plainCols.map((c) => html`
-            <${PlainField} key=${c} name=${c} value=${form.props[c]}
-              onChange=${(v) => setForm((f) => ({ ...f, props: { ...f.props, [c]: v } }))} />`)}
+            <${PlainField} key=${c} name=${c} value=${form.props[c]} onChange=${(v) => setProp(c, v)} />`)}
         </div>`}
     </div>`;
 }
@@ -891,14 +898,12 @@ function sameSet(a = [], b = []) {
   return b.every((x) => s.has(x));
 }
 
-/** Vocabulary of a property table, re-read whenever `vocab` changes. */
-function useOptions(db, table, vocab, onLabelAdded, onError) {
-  const options = useMemo(() => listOptions(db, table), [db, table, vocab]);
+/** Vocabulary of a property table, re-read after every write to the database. */
+function useOptions({ db, version, write, onError }, table) {
+  const options = useMemo(() => listOptions(db, table), [db, table, version]);
   const add = (label) => {
     try {
-      const id = addOption(db, table, label);
-      onLabelAdded();
-      return id;
+      return write(() => addOption(db, table, label));
     } catch (e) {
       onError(errorText(e));
       return null;
@@ -924,8 +929,8 @@ function FieldHead({ name, detail }) {
 }
 
 /** Convention 4 single value: at most one label from the vocabulary. */
-function SingleField({ db, p, value, allowEmpty, onChange, vocab, onLabelAdded, onError }) {
-  const [options, add] = useOptions(db, p.propertyTable, vocab, onLabelAdded, onError);
+function SingleField({ p, value, allowEmpty, onChange, ...field }) {
+  const [options, add] = useOptions(field, p.propertyTable);
   const known = value === null || options.some((o) => o.id === value);
   return html`
     <div class="field">
@@ -940,8 +945,8 @@ function SingleField({ db, p, value, allowEmpty, onChange, vocab, onLabelAdded, 
 }
 
 /** Convention 4 multi value: any number of labels, through a junction table. */
-function MultiField({ db, mv, value, onChange, vocab, onLabelAdded, onError }) {
-  const [options, add] = useOptions(db, mv.propertyTable, vocab, onLabelAdded, onError);
+function MultiField({ mv, value, onChange, ...field }) {
+  const [options, add] = useOptions(field, mv.propertyTable);
   const selected = new Set(value);
   const toggle = (id) => {
     const next = new Set(selected);
@@ -962,7 +967,7 @@ function MultiField({ db, mv, value, onChange, vocab, onLabelAdded, onError }) {
 
 /** Any other column: a raw value that can also be NULL. */
 function PlainField({ name, value, onChange }) {
-  const isNull = value === null || value === undefined;
+  const isNull = value === null;
   return html`
     <div class="plain small">
       <span title=${name} style="overflow:hidden;text-overflow:ellipsis">${name}</span>
@@ -972,7 +977,7 @@ function PlainField({ name, value, onChange }) {
     </div>`;
 }
 
-function ViewTable({ db, name, tick }) {
+function ViewTable({ db, name, version }) {
   const LIMIT = 500;
   const result = useMemo(() => {
     try {
@@ -985,8 +990,8 @@ function ViewTable({ db, name, tick }) {
     } catch (e) {
       return { error: errorText(e) };
     }
-  }, [db, name, tick]);
-  if (result.error) return html`<p class="center" style="color:var(--danger)">${result.error}</p>`;
+  }, [db, name, version]);
+  if (result.error) return html`<p class="center error">${result.error}</p>`;
   return html`
     <div class="pane-head"><span style="font-weight:600">${name}</span><span class="small muted">read only</span></div>
     <div class="pane-body">
@@ -1009,6 +1014,9 @@ if ("serviceWorker" in navigator && location.protocol === "https:") {
 const root = document.getElementById("app");
 root.textContent = "";
 render(html`<${App} />`, root);
+// Start SQLite while the user is still choosing a file. A failure here is
+// retried, and reported, on the first open.
+(window.requestIdleCallback ?? ((f) => setTimeout(f, 200)))(() => initSqlite().catch(() => {}));
 </script>
 
 <!-- vendor:begin — generated by `npm run vendor`; do not edit below this line -->
