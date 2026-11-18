@@ -160,15 +160,22 @@ function initSqlite() {
       URL.revokeObjectURL(url);
       const b64 = document.getElementById("sqlite3-wasm").textContent.trim();
       const wasm = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-      return sqlite3InitModule({
+      // `done` only reports success, so a failed instantiation is surfaced
+      // by racing it against the module's own promise.
+      let failed;
+      const failure = new Promise((_, reject) => { failed = reject; });
+      return Promise.race([failure, sqlite3InitModule({
         print: () => {},
         printErr: (...args) => console.warn(...args),
         instantiateWasm(imports, done) {
-          WebAssembly.instantiate(wasm, imports).then((r) => done(r.instance, r.module));
+          WebAssembly.instantiate(wasm, imports)
+            .then((r) => done(r.instance, r.module))
+            .catch((e) => failed(new Error(`Could not start SQLite: ${errorText(e)}`)));
           return {};
         },
-      });
+      })]);
     })();
+    sqlitePromise.catch(() => { sqlitePromise = null; }); // allow a retry
   }
   return sqlitePromise;
 }
@@ -298,28 +305,31 @@ function inspect(db) {
 
 /**
  * Maps each `<name>_id` column of `table` to the note or property table it
- * refers to. A declared foreign key to `id` wins; otherwise `<name>_id`
- * refers to `<prefix><name>` where `<prefix>` is a leading `..._` part of
- * the table's own name (longest match first).
+ * refers to. A declared foreign key decides: it counts only when it targets
+ * `id` of such a table. Without one, `<name>_id` refers to `<prefix><name>`
+ * where `<prefix>` is a leading `..._` part of the table's own name (longest
+ * match first, the table itself excluded), or no prefix at all.
  */
 function resolveReferences(db, table, cols, targets) {
   const declared = new Map();
   for (const fk of all(db, `SELECT "from", "table", "to" FROM pragma_foreign_key_list(?)`, [table])) {
-    if (fk.to === null || fk.to === "id") declared.set(fk.from, fk.table);
+    declared.set(fk.from, fk.to === null || fk.to === "id" ? fk.table : null);
   }
   const prefixes = [];
   for (let i = table.indexOf("_"); i !== -1; i = table.indexOf("_", i + 1)) prefixes.unshift(table.slice(0, i + 1));
+  prefixes.push("");
 
   const result = new Map();
   for (const { name } of cols) {
     if (name === "id" || !name.endsWith("_id")) continue;
     if (declared.has(name)) {
-      if (targets.has(declared.get(name))) result.set(name, declared.get(name));
+      const target = declared.get(name);
+      if (target !== null && targets.has(target)) result.set(name, target);
       continue;
     }
     const stem = name.slice(0, -3);
-    const match = prefixes.map((p) => p + stem).find((t) => targets.has(t));
-    if (match && match !== table) result.set(name, match);
+    const match = prefixes.map((p) => p + stem).find((t) => t !== table && targets.has(t));
+    if (match) result.set(name, match);
   }
   return result;
 }
@@ -412,8 +422,13 @@ async function writeToHandle(handle, bytes) {
     throw new Error("Permission to write the file was denied");
   }
   const w = await handle.createWritable();
-  await w.write(bytes);
-  await w.close();
+  try {
+    await w.write(bytes);
+    await w.close();
+  } catch (e) {
+    await w.abort().catch(() => {}); // leave the original file untouched
+    throw e;
+  }
 }
 
 function download(bytes, name) {
@@ -443,7 +458,7 @@ async function fetchFormat(input) {
   const url = normalizeFormatUrl(input);
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Fetch failed (HTTP ${res.status})`);
-  return { sql: await res.text(), name: url.split("/").pop() };
+  return { sql: await res.text(), name: new URL(url).pathname.split("/").pop() };
 }
 
 const errorText = (e) => (e instanceof Error ? e.message : String(e));
@@ -458,7 +473,16 @@ function App() {
   const [tick, setTick] = useState(0); // bumps after notes change
   const [sel, setSel] = useState({ table: null, view: null, record: null });
   const [formDirty, setFormDirty] = useState(false);
+  const [epoch, setEpoch] = useState(0); // remounts the editor on every selection
+  // Counts changes to the database, so a save that finishes after newer
+  // changes does not mark them as saved.
+  const changes = useRef(0);
+  const markModified = () => { changes.current += 1; setModified(true); };
   const [error, setError] = useState(null);
+  // Code that runs after an await (opening a file, fetching a format) reads
+  // the current document through this ref, not the possibly stale `doc`.
+  const docRef = useRef(null);
+  docRef.current = doc;
 
   const guard = (fn) => async (...args) => {
     setError(null);
@@ -500,14 +524,16 @@ function App() {
 
   const openFile = guard(async (file, handle = null) => {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    if (!isSqliteFile(bytes)) {
+    // An empty .sql file is an empty format, not an empty database.
+    if (!isSqliteFile(bytes) || (bytes.length === 0 && /\.sql$/i.test(file.name))) {
       // Not a database: treat it as a format.sql to apply.
       return applySql(new TextDecoder().decode(bytes), file.name);
     }
     if (!discardForm() || !discardDoc()) return;
     const { db, header, wal } = await openDatabase(bytes);
-    const inspection = inspect(db);
-    doc?.db.close();
+    let inspection;
+    try { inspection = inspect(db); } catch (e) { db.close(); throw e; }
+    docRef.current?.db.close();
     // A WAL-mode file may have a -wal file next to it that this page cannot
     // see. Writing over the database would let SQLite replay stale frames
     // onto it later, so WAL files are only ever saved as a download.
@@ -516,17 +542,27 @@ function App() {
   });
 
   async function applySql(sql, sourceName) {
+    if (sql.trim() === "") throw new Error(`${sourceName} is empty`);
+    const doc = docRef.current;
     if (doc) {
       if (!discardForm() || !confirm(`Apply ${sourceName} to ${doc.name}?`)) return;
       applyFormat(doc.db, sql);
-      setDoc({ ...doc, inspection: inspect(doc.db) });
-      setModified(true);
+      const inspection = inspect(doc.db);
+      setDoc({ ...doc, inspection });
+      // The format may have dropped or replaced the selected table or view.
+      setSel((cur) =>
+        (cur.table && !inspection.noteTables.some((t) => t.name === cur.table)) ||
+        (cur.view && !inspection.views.includes(cur.view))
+          ? { table: inspection.noteTables[0]?.name ?? null, view: null, record: null }
+          : cur);
+      setFormDirty(false); // the draft was discarded above
+      markModified();
       setTick((n) => n + 1);
     } else {
       const { db } = await openDatabase(null);
       try { applyFormat(db, sql); } catch (e) { db.close(); throw e; }
       show({ db, name: "notes.db", handle: null, header: null, inspection: inspect(db) });
-      setModified(true);
+      markModified();
     }
   }
 
@@ -554,10 +590,11 @@ function App() {
 
   const save = guard(async () => {
     if (!saveWithoutDraft()) return;
+    const seen = changes.current;
     const bytes = await exportDatabase(doc.db, doc.header);
     if (doc.handle) await writeToHandle(doc.handle, bytes);
     else download(bytes, doc.name);
-    setModified(false);
+    if (changes.current === seen) setModified(false);
   });
 
   const saveCopy = guard(async () => {
@@ -573,7 +610,12 @@ function App() {
     setFormDirty(false);
   }
 
-  const select = (next) => { if (discardForm()) { setSel(next); setFormDirty(false); } };
+  const select = (next) => {
+    if (!discardForm()) return;
+    setSel(next);
+    setFormDirty(false);
+    setEpoch((n) => n + 1);
+  };
 
   if (!doc) {
     return html`
@@ -585,7 +627,7 @@ function App() {
 
   const onSaveNote = guard((data, multi) => {
     const id = saveNote(doc.db, nt, sel.record, data, multi);
-    setModified(true);
+    markModified();
     setFormDirty(false);
     setTick((n) => n + 1);
     setSel({ ...sel, record: { kind: "edit", id } });
@@ -593,7 +635,7 @@ function App() {
 
   const onDeleteNote = guard(() => {
     deleteNote(doc.db, nt, sel.record.id);
-    setModified(true);
+    markModified();
     setFormDirty(false);
     setTick((n) => n + 1);
     setSel({ ...sel, record: null });
@@ -616,10 +658,10 @@ function App() {
           <div class="pane">
             ${nt && sel.record
               ? html`<${NoteEditor}
-                  key=${`${nt.name}:${sel.record.kind === "edit" ? sel.record.id : "new"}:${tick}`}
+                  key=${`${nt.name}:${sel.record.kind === "edit" ? sel.record.id : "new"}:${tick}:${epoch}`}
                   db=${doc.db} nt=${nt} target=${sel.record}
                   onSave=${onSaveNote} onDelete=${onDeleteNote}
-                  onDirty=${setFormDirty} onModified=${() => setModified(true)} onError=${setError} />`
+                  onDirty=${setFormDirty} onModified=${markModified} onError=${setError} />`
               : html`<p class="center muted">${sel.table ? "Select a note or create a new one" : ""}</p>`}
           </div>`}
     </div>
@@ -712,8 +754,12 @@ function Sidebar({ doc, sel, modified, onSelect, onSave, onSaveCopy, onClose, on
 }
 
 function NoteList({ db, table, tick, selectedId, onSelect, onNew }) {
-  const notes = useMemo(() => (table ? listNotes(db, table) : []), [db, table, tick]);
+  const result = useMemo(() => {
+    try { return { notes: table ? listNotes(db, table) : [] }; } catch (e) { return { error: errorText(e) }; }
+  }, [db, table, tick]);
   if (!table) return html`<div class="pane"><p class="center muted">Select a note table</p></div>`;
+  if (result.error) return html`<div class="pane"><p class="center" style="color:var(--danger)">${result.error}</p></div>`;
+  const { notes } = result;
   return html`
     <div class="pane list">
       <div class="pane-head">
@@ -758,6 +804,10 @@ function NoteEditor({ db, nt, target, onSave, onDelete, onDirty, onModified, onE
     return { title: rec ? String(rec.title ?? "") : "", body: rec ? String(rec.body ?? "") : "", props, multi };
   }, []);
   const [form, setForm] = useState(initial);
+  // Bumped when a label is added, so every field re-reads its vocabulary
+  // (two fields can share one property table).
+  const [vocab, setVocab] = useState(0);
+  const onLabelAdded = () => { setVocab((n) => n + 1); onModified(); };
   const update = (patch) => setForm((f) => ({ ...f, ...patch }));
 
   const dirty = useMemo(() =>
@@ -787,6 +837,21 @@ function NoteEditor({ db, nt, target, onSave, onDelete, onDirty, onModified, onE
     }
   }
 
+  // Ctrl/Cmd+S saves the open note wherever the focus is. An unchanged
+  // note is left alone so its updated_at does not move.
+  const saveRef = useRef(save);
+  saveRef.current = () => { if (dirty || target.kind === "new") save(); };
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        saveRef.current();
+      }
+    };
+    addEventListener("keydown", onKey);
+    return () => removeEventListener("keydown", onKey);
+  }, []);
+
   const hasProps = plainCols.length > 0 || nt.single.length > 0 || nt.multi.length > 0;
 
   return html`
@@ -799,8 +864,7 @@ function NoteEditor({ db, nt, target, onSave, onDelete, onDirty, onModified, onE
     </div>
     <div class="detail">
       <textarea placeholder="Write here…" value=${form.body}
-        onInput=${(e) => update({ body: e.target.value })}
-        onKeyDown=${(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); save(); } }} />
+        onInput=${(e) => update({ body: e.target.value })} />
       ${hasProps && html`
         <div class="props">
           ${nt.single.map((p) => html`
@@ -808,12 +872,12 @@ function NoteEditor({ db, nt, target, onSave, onDelete, onDirty, onModified, onE
               value=${form.props[p.column] === null || form.props[p.column] === undefined ? null : String(form.props[p.column])}
               allowEmpty=${p.nullable || (target.kind === "new" && p.hasDefault)}
               onChange=${(v) => setForm((f) => ({ ...f, props: { ...f.props, [p.column]: v } }))}
-              onModified=${onModified} onError=${onError} />`)}
+              vocab=${vocab} onLabelAdded=${onLabelAdded} onError=${onError} />`)}
           ${nt.multi.map((mv) => html`
             <${MultiField} key=${mv.junctionTable} db=${db} mv=${mv}
               value=${form.multi[mv.junctionTable] ?? []}
               onChange=${(ids) => setForm((f) => ({ ...f, multi: { ...f.multi, [mv.junctionTable]: ids } }))}
-              onModified=${onModified} onError=${onError} />`)}
+              vocab=${vocab} onLabelAdded=${onLabelAdded} onError=${onError} />`)}
           ${plainCols.map((c) => html`
             <${PlainField} key=${c} name=${c} value=${form.props[c]}
               onChange=${(v) => setForm((f) => ({ ...f, props: { ...f.props, [c]: v } }))} />`)}
@@ -827,15 +891,13 @@ function sameSet(a = [], b = []) {
   return b.every((x) => s.has(x));
 }
 
-/** Vocabulary of a property table, re-read after a label is added. */
-function useOptions(db, table, onModified, onError) {
-  const [n, setN] = useState(0);
-  const options = useMemo(() => listOptions(db, table), [db, table, n]);
+/** Vocabulary of a property table, re-read whenever `vocab` changes. */
+function useOptions(db, table, vocab, onLabelAdded, onError) {
+  const options = useMemo(() => listOptions(db, table), [db, table, vocab]);
   const add = (label) => {
     try {
       const id = addOption(db, table, label);
-      setN((x) => x + 1);
-      onModified();
+      onLabelAdded();
       return id;
     } catch (e) {
       onError(errorText(e));
@@ -862,8 +924,8 @@ function FieldHead({ name, detail }) {
 }
 
 /** Convention 4 single value: at most one label from the vocabulary. */
-function SingleField({ db, p, value, allowEmpty, onChange, onModified, onError }) {
-  const [options, add] = useOptions(db, p.propertyTable, onModified, onError);
+function SingleField({ db, p, value, allowEmpty, onChange, vocab, onLabelAdded, onError }) {
+  const [options, add] = useOptions(db, p.propertyTable, vocab, onLabelAdded, onError);
   const known = value === null || options.some((o) => o.id === value);
   return html`
     <div class="field">
@@ -878,8 +940,8 @@ function SingleField({ db, p, value, allowEmpty, onChange, onModified, onError }
 }
 
 /** Convention 4 multi value: any number of labels, through a junction table. */
-function MultiField({ db, mv, value, onChange, onModified, onError }) {
-  const [options, add] = useOptions(db, mv.propertyTable, onModified, onError);
+function MultiField({ db, mv, value, onChange, vocab, onLabelAdded, onError }) {
+  const [options, add] = useOptions(db, mv.propertyTable, vocab, onLabelAdded, onError);
   const selected = new Set(value);
   const toggle = (id) => {
     const next = new Set(selected);
