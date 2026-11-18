@@ -9,11 +9,8 @@ const mod = (path) => new URL(`../node_modules/${path}`, import.meta.url);
 const read = (path) => readFileSync(mod(path), "utf8");
 const version = (pkg) => JSON.parse(read(`${pkg}/package.json`)).version;
 
-// Keep embedded classic scripts from closing their own <script> early.
-const safe = (js) => js.replace(/<\/script/gi, "<\\/script").replace(/<!--/g, "<\\!--");
-
-// The SQLite module is embedded byte for byte (it is read back as text and
-// imported), so it must not contain anything the HTML parser would act on.
+// Every block is embedded byte for byte, so it must not contain anything the
+// HTML parser would act on inside a <script>. Fail rather than rewrite code.
 const verbatim = (js, name) => {
   if (/<\/script|<!--/i.test(js)) throw new Error(`${name} contains </script or <!--; cannot embed verbatim`);
   return js;
@@ -22,7 +19,7 @@ const verbatim = (js, name) => {
 const SQLITE = "@sqlite.org/sqlite-wasm";
 const blocks = [
   `<!-- htm ${version("htm")} (bundles Preact) — https://github.com/developit/htm — Apache-2.0 -->`,
-  `<script>${safe(read("htm/preact/standalone.umd.js"))}</script>`,
+  `<script>${verbatim(read("htm/preact/standalone.umd.js"), "htm standalone.umd.js")}</script>`,
   `<!-- ${SQLITE} ${version(SQLITE)} — official SQLite WebAssembly build — https://sqlite.org/wasm — Apache-2.0 (wrapper), public domain (SQLite) -->`,
   `<script type="text/plain" id="sqlite3-module">${verbatim(read(`${SQLITE}/dist/index.mjs`), "index.mjs")}</script>`,
   `<script type="application/octet-stream" id="sqlite3-wasm">${readFileSync(mod(`${SQLITE}/dist/sqlite3.wasm`)).toString("base64")}</script>`,

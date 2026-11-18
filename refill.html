@@ -214,16 +214,18 @@ async function openDatabase(bytes) {
   const header = [bytes[HEADER_WRITE], bytes[HEADER_READ]];
   if (bytes[HEADER_WRITE] === 2) bytes[HEADER_WRITE] = 1;
   if (bytes[HEADER_READ] === 2) bytes[HEADER_READ] = 1;
+  try { loadInto(db, bytes); } catch (e) { db.close(); throw e; }
+  return { db, header };
+}
+
+/** Replaces the whole content of `db` with a serialized database. */
+function loadInto(db, bytes) {
   const ptr = sqlite3.wasm.allocFromTypedArray(bytes);
   const rc = sqlite3.capi.sqlite3_deserialize(
     db, "main", ptr, bytes.byteLength, bytes.byteLength,
     sqlite3.capi.SQLITE_DESERIALIZE_FREEONCLOSE | sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE,
   );
-  if (rc !== 0) {
-    db.close();
-    throw new Error(`Could not open the database (sqlite3_deserialize rc=${rc})`);
-  }
-  return { db, header };
+  if (rc !== 0) throw new Error(`Could not load the database (sqlite3_deserialize rc=${rc})`);
 }
 
 const isWal = (header) => header?.includes(2) ?? false;
@@ -261,20 +263,17 @@ function rollbackIfOpen(db) {
 }
 
 /**
- * Applies a format.sql atomically. A script that runs its own BEGIN ...
- * COMMIT cannot be nested in ours, so that one is run as it is.
+ * Applies a format.sql all or nothing. The script runs as written, so it may
+ * manage its own transactions (BEGIN, COMMIT, VACUUM ...); on any error the
+ * database is restored from a snapshot taken just before.
  */
 function applyFormat(db, sql) {
-  try {
-    inTransaction(db, () => db.exec(sql));
-    return;
-  } catch (e) {
-    if (!/within a transaction/i.test(errorText(e))) throw e;
-  }
+  const snapshot = sqlite3.capi.sqlite3_js_db_export(db);
   try {
     db.exec(sql);
   } catch (e) {
     rollbackIfOpen(db);
+    loadInto(db, snapshot);
     throw e;
   }
 }
@@ -505,12 +504,17 @@ const errorText = (e) => (e instanceof Error ? e.message : String(e));
    UI
    ========================================================================== */
 
-/** Keeps a selection whose table or view still exists; otherwise the first note table. */
-function resolveSel(cur, inspection) {
+/**
+ * Keeps a selection whose table or view (and note) still exists; otherwise
+ * falls back to the table, or to the first note table.
+ */
+function resolveSel(cur, inspection, db) {
   const exists = cur && (cur.view
     ? inspection.views.includes(cur.view)
     : inspection.noteTables.some((t) => t.name === cur.table));
-  return exists ? cur : { table: inspection.noteTables[0]?.name ?? null, view: null, record: null };
+  if (!exists) return { table: inspection.noteTables[0]?.name ?? null, view: null, record: null };
+  if (cur.record?.kind === "edit" && !getNote(db, cur.table, cur.record.id)) return { ...cur, record: null };
+  return cur;
 }
 
 function App() {
@@ -532,8 +536,12 @@ function App() {
   const setSelection = (next) =>
     setSel((cur) => ({ ...(typeof next === "function" ? next(cur) : next), session: cur.session + 1 }));
   /** Every write to the database goes through here. */
+  // Writes are all or nothing (transactions, snapshots), so a failed one
+  // leaves the database as it was and does not count.
   const write = (fn) => {
-    try { return fn(); } finally { setVersion((v) => v + 1); }
+    const result = fn();
+    setVersion((v) => v + 1);
+    return result;
   };
   /** Swaps in another document (or none) and records whether it matches the disk. */
   function replaceDoc(next, { saved }) {
@@ -564,10 +572,9 @@ function App() {
 
   const openFile = guard(async (file, handle = null) => {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    // Not a database (an empty .sql file included): a format.sql to apply.
-    if (!isSqliteFile(bytes) || (bytes.length === 0 && /\.sql$/i.test(file.name))) {
-      return applySql(new TextDecoder().decode(bytes), file.name);
-    }
+    // A .sql file is a format to apply; anything else must be a database.
+    if (/\.sql$/i.test(file.name)) return applySql(new TextDecoder().decode(bytes), file.name);
+    if (!isSqliteFile(bytes)) throw new Error(`${file.name} is not a SQLite database`);
     if (!discardForm() || !discardDoc()) return;
     const { db, header } = await openDatabase(bytes);
     let inspection;
@@ -583,14 +590,11 @@ function App() {
     const doc = live.current.doc;
     if (doc) {
       if (!discardForm() || !confirm(`Apply ${sourceName} to ${doc.name}?`)) return;
-      try {
-        write(() => applyFormat(doc.db, sql));
-      } finally {
-        // The format may have added, dropped or replaced tables and views.
-        const inspection = inspect(doc.db);
-        setDoc({ ...doc, inspection });
-        setSelection((cur) => resolveSel(cur, inspection));
-      }
+      write(() => applyFormat(doc.db, sql));
+      // The format may have added, dropped or replaced tables, views and notes.
+      const inspection = inspect(doc.db);
+      setDoc({ ...doc, inspection });
+      setSelection((cur) => resolveSel(cur, inspection, doc.db));
     } else {
       const { db } = await openDatabase(null);
       let inspection;
@@ -626,7 +630,9 @@ function App() {
     const bytes = exportDatabase(doc.db, doc.header);
     if (doc.handle) await writeToHandle(doc.handle, bytes);
     else download(bytes, doc.name);
-    setSavedVersion(seen); // writes made during the await stay unsaved
+    // Writes made during the await stay unsaved, and a document opened in
+    // the meantime has its own saved state.
+    if (live.current.doc === doc) setSavedVersion(seen);
   });
 
   const saveCopy = guard(async () => {
@@ -842,7 +848,9 @@ function NoteEditor({ db, nt, target, version, write, onSave, onDelete, onDirty,
     } else {
       // Only the columns the user changed, so untouched values stay exactly
       // as stored (type and representation included).
-      const data = { title, body: form.body, updated_at: ts };
+      const data = { updated_at: ts };
+      if (form.title !== initial.title) data.title = title;
+      if (form.body !== initial.body) data.body = form.body;
       for (const c of changedProps) data[c] = form.props[c];
       onSave(data, form.multi);
     }
@@ -918,7 +926,7 @@ function AddLabel({ onAdd }) {
     <input class="small" placeholder="+ new label (Enter)" value=${text}
       onInput=${(e) => setText(e.target.value)}
       onKeyDown=${(e) => {
-        if (e.key !== "Enter") return;
+        if (e.key !== "Enter" || e.isComposing || e.keyCode === 229) return; // 229: IME confirm
         e.preventDefault();
         if (text.trim() !== "") { onAdd(text.trim()); setText(""); }
       }} />`;

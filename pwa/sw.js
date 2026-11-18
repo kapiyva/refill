@@ -19,21 +19,30 @@ const sameVersion = (a, b) => {
   return tag(a) !== null && tag(a) !== undefined && tag(a) === tag(b);
 };
 
+// One cache entry per file: the query string is ignored, and refill.html
+// shares the entry of the page it is a copy of.
+function cacheKey(request) {
+  const url = new URL(request.url);
+  url.search = "";
+  url.hash = "";
+  if (url.pathname.endsWith("/refill.html") || url.pathname.endsWith("/index.html")) {
+    url.pathname = url.pathname.replace(/[^/]+$/, "");
+  }
+  return url.href;
+}
+
 async function fromNetwork(request) {
   const res = await fetch(request);
   if (res.ok) {
     const cache = await caches.open(CACHE);
+    const key = cacheKey(request);
     // Skip rewriting an unchanged copy (the page is ~2 MB).
-    if (!sameVersion(res, await cache.match(request))) await cache.put(request, res.clone());
+    if (!sameVersion(res, await cache.match(key))) await cache.put(key, res.clone());
   }
   return res;
 }
 
-async function fromCache(request) {
-  const hit = await caches.match(request, { ignoreSearch: true });
-  if (hit) return hit;
-  if (new URL(request.url).pathname.endsWith("/refill.html")) return caches.match("./");
-}
+const fromCache = (request) => caches.match(cacheKey(request));
 
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
