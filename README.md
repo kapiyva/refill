@@ -1,49 +1,59 @@
 # refill
 
-A browser-native client for [note.sql](https://github.com/kapiyva/note.sql) SQLite files.
+A plain, self-contained editor for [note.sql](https://github.com/kapiyva/note.sql) SQLite files.
 
 English | [日本語](README.ja.md)
 
 ## Overview
 
 refill reads and writes any SQLite file that follows the note.sql conventions, entirely in the browser.
+Its purpose is to guarantee that a note.sql file can always be opened, read and edited, anywhere.
 
-- **Fully client-side** — WASM SQLite runs in the browser. Nothing leaves the page.
-- **Statically hostable** — Deployable to GitHub Pages, Cloudflare Pages, or any static host.
-- **Format-agnostic** — Works with any note.sql–conforming format. No format-specific code.
-- **A reference implementation** — Minimal dependencies and plain code, intended to show how note.sql conventions translate into a working tool.
+- **One file** — [`refill.html`](refill.html) is the whole program. No build step, no install, no server.
+- **Works offline, even from disk** — sql.js (SQLite compiled to WebAssembly) and Preact are embedded. Nothing is fetched, and nothing leaves the page.
+- **Format-agnostic** — Works with any note.sql–conforming format, from the schema alone. No format-specific code.
+- **A reference implementation** — Plain code, meant to show how the note.sql conventions translate into a working tool.
+
+## Use it
+
+- **On the web** — open the hosted copy (GitHub Pages) and pick a file. It can be installed as an app (PWA); on Chromium-based browsers the installed app can also open `.db` / `.sqlite` files from the OS.
+- **Offline, without this site** — download `refill.html` once and keep it with your notes. Double-click it to open it in any modern browser.
+
+Saving writes back to the opened file on Chromium-based browsers (File System Access API). Other browsers save by downloading a copy.
 
 ## Features
 
-- Open a local SQLite file (file picker or drag & drop)
-- Apply a format from a GitHub URL pointing to `format.sql`
+- Open a SQLite file (file picker or drag & drop)
+- Start a new file, or add a format to an open one, from a `format.sql` (local file or GitHub URL)
 - Auto-detection of note tables (Convention 1), property tables and their references (Convention 4), and views
-- CRUD on note records — Markdown editor + property panel (with NULL representation). `title` is optional; untitled notes are listed by their first body line
-- Property editing per Convention 4: single-value references as a label picker, multi-value references (junction tables) as label toggles, and adding new labels to a vocabulary
+- Notes: list, read, write, create, delete. `title` is optional; untitled notes are listed by their first body line
+- Properties per Convention 4: single-value references as a label picker, multi-value references (junction tables) as label toggles, and adding new labels to a vocabulary. Other columns are edited as raw values, NULL included
 - Read-only display of views
-- Save the modified database back to disk (download)
+- WAL-mode files are opened and saved without changing their journal mode
 
 ## Development
 
+Edit `refill.html` directly and reload the page. There is nothing to build.
+
+Node is only needed to refresh the embedded libraries at the end of `refill.html`:
+
 ```bash
-pnpm install
-pnpm dev
+npm install      # pinned versions in package.json
+npm run vendor   # rewrites the vendor blocks in refill.html
 ```
 
-Open http://localhost:5173/. Drop a SQLite file, or paste a GitHub URL pointing to a `format.sql`.
-
-A minimal verification fixture can be generated:
+A verification fixture can be generated with:
 
 ```bash
 sqlite3 fixtures/test.db < fixtures/seed.sql
 ```
 
-## Stack
+`pwa/` holds the files that make the hosted copy installable and available offline (manifest, service worker, icons). `refill.html` works without them.
 
-- React 18 + Vite 6 + TypeScript
-- Tailwind CSS v4
-- [`@sqlite.org/sqlite-wasm`](https://github.com/sqlite/sqlite-wasm) — official WASM SQLite
-- [`marked`](https://github.com/markedjs/marked) + [`dompurify`](https://github.com/cure53/DOMPurify) — Markdown rendering with sanitization
+## Embedded libraries
+
+- [sql.js](https://github.com/sql-js/sql.js) — SQLite as WebAssembly (MIT)
+- [htm](https://github.com/developit/htm) with [Preact](https://preactjs.com/) — UI without a build step (Apache-2.0 / MIT)
 
 ## License
 
