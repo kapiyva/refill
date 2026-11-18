@@ -47,7 +47,11 @@ export function RecordList({
                   r.id === selectedId ? "bg-blue-50" : "hover:bg-gray-50"
                 }`}
               >
-                <div className="truncate text-sm">{r.title}</div>
+                <div
+                  className={`truncate text-sm ${r.title ? "" : "text-gray-600"}`}
+                >
+                  {displayLabel(r)}
+                </div>
                 <div className="text-xs text-gray-500">
                   {formatTimestamp(r.updated_at)}
                 </div>
@@ -58,6 +62,16 @@ export function RecordList({
       )}
     </div>
   );
+}
+
+// title is optional (Convention 1): fall back to the first non-empty body line.
+function displayLabel(r: NoteListItem): string {
+  if (r.title && r.title.trim() !== "") return r.title;
+  const line = (r.body_head ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l !== "");
+  return line ?? "(empty)";
 }
 
 function formatTimestamp(s: string): string {

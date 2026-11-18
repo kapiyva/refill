@@ -19,11 +19,11 @@ import {
   normalizeFormatUrl,
 } from "./db/format";
 import {
-  deleteRecord,
+  deleteNote,
   getRecord,
-  insertRecord,
   listNotes,
-  updateRecord,
+  saveNote,
+  type MultiValueSelection,
   type NoteListItem,
   type Record,
 } from "./db/records";
@@ -195,15 +195,20 @@ export default function App() {
     setDirty(false);
   }
 
-  function handleSave(data: Record) {
-    if (!loaded || !selectedTable || !selectedRecord) return;
+  function handleSave(data: Record, selection: MultiValueSelection) {
+    if (!loaded || !noteTable || !selectedRecord) return;
     setError(null);
     try {
+      const id = saveNote(
+        loaded.db,
+        noteTable.name,
+        selectedRecord,
+        data,
+        noteTable.multiValueProperties,
+        selection,
+      );
       if (selectedRecord.kind === "new") {
-        insertRecord(loaded.db, selectedTable, data);
-        setSelectedRecord({ kind: "edit", id: data.id as string });
-      } else {
-        updateRecord(loaded.db, selectedTable, selectedRecord.id, data);
+        setSelectedRecord({ kind: "edit", id });
       }
       setDirty(false);
       setRefreshTick((n) => n + 1);
@@ -215,14 +220,19 @@ export default function App() {
   function handleDelete() {
     if (
       !loaded ||
-      !selectedTable ||
+      !noteTable ||
       !selectedRecord ||
       selectedRecord.kind !== "edit"
     )
       return;
     setError(null);
     try {
-      deleteRecord(loaded.db, selectedTable, selectedRecord.id);
+      deleteNote(
+        loaded.db,
+        noteTable.name,
+        selectedRecord.id,
+        noteTable.multiValueProperties,
+      );
       setSelectedRecord(null);
       setDirty(false);
       setRefreshTick((n) => n + 1);
@@ -246,7 +256,9 @@ export default function App() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = loaded.source.endsWith(".db") ? loaded.source : "notes.db";
+      a.download = /\.(db|sqlite3?)$/i.test(loaded.source)
+        ? loaded.source
+        : "notes.db";
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
@@ -303,6 +315,9 @@ export default function App() {
           <main className="flex-1 overflow-hidden">
             {selectedRecord && noteTable ? (
               <NoteDetail
+                // remount per target so a new note never starts from the
+                // previous note's form state
+                key={`${noteTable.name}:${selectedRecordId ?? "new"}`}
                 db={loaded.db}
                 mode={selectedRecord.kind}
                 noteTable={noteTable}
@@ -314,6 +329,7 @@ export default function App() {
                   selectedRecord.kind === "edit" ? handleDelete : undefined
                 }
                 onDirtyChange={setDirty}
+                onError={setError}
               />
             ) : (
               <div className="flex h-full items-center justify-center text-sm text-gray-400">

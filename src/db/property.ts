@@ -1,66 +1,78 @@
 import type { Database } from "./sqlite";
-import type { Record, SqlValue } from "./records";
+import type { MultiValueProperty } from "../types";
+import { quoteIdent } from "./records";
 
-export type PropertyRow = Record & { rowid: number };
+export type PropertyOption = { id: string; label: string };
 
-export function listPropertyRows(
+/** All vocabulary rows of a property table, ordered by label. */
+export function listPropertyOptions(
   db: Database,
-  tableName: string,
-  fkColumn: string,
+  propertyTable: string,
+): PropertyOption[] {
+  return (
+    db.selectObjects(
+      `SELECT id, label FROM ${quoteIdent(propertyTable)} ORDER BY label, id`,
+    ) as { id: unknown; label: unknown }[]
+  ).map((r) => ({ id: String(r.id), label: String(r.label ?? "") }));
+}
+
+/**
+ * Adds a vocabulary row with only the columns note.sql defines; Convention 5
+ * guarantees every other column is nullable or has a default.
+ */
+export function insertPropertyOption(
+  db: Database,
+  propertyTable: string,
+  label: string,
+): PropertyOption {
+  const id = crypto.randomUUID();
+  db.exec({
+    sql: `INSERT INTO ${quoteIdent(propertyTable)} (id, label) VALUES (?, ?)`,
+    bind: [id, label],
+  });
+  return { id, label };
+}
+
+/** Property ids a note currently holds through a junction table. */
+export function listSelectedPropertyIds(
+  db: Database,
+  mv: MultiValueProperty,
   noteId: string,
-): PropertyRow[] {
-  const rows = db.selectObjects(
-    `SELECT rowid, * FROM ${quoteIdent(tableName)} WHERE ${quoteIdent(fkColumn)} = ? ORDER BY rowid`,
-    [noteId],
-  );
-  return rows as PropertyRow[];
+): string[] {
+  return (
+    db.selectObjects(
+      `SELECT ${quoteIdent(mv.propertyColumn)} AS pid
+       FROM ${quoteIdent(mv.junctionTable)}
+       WHERE ${quoteIdent(mv.noteColumn)} = ?`,
+      [noteId],
+    ) as { pid: unknown }[]
+  ).map((r) => String(r.pid));
 }
 
-export function insertPropertyRow(
+/** Makes the junction rows for `noteId` match `propertyIds` exactly. */
+export function syncSelectedPropertyIds(
   db: Database,
-  tableName: string,
-  data: Record,
+  mv: MultiValueProperty,
+  noteId: string,
+  propertyIds: string[],
 ): void {
-  const cols = Object.keys(data);
-  if (cols.length === 0) {
-    throw new Error("insertPropertyRow: empty data");
+  const current = new Set(listSelectedPropertyIds(db, mv, noteId));
+  const next = new Set(propertyIds);
+  const table = quoteIdent(mv.junctionTable);
+  const noteCol = quoteIdent(mv.noteColumn);
+  const propCol = quoteIdent(mv.propertyColumn);
+  for (const id of current) {
+    if (next.has(id)) continue;
+    db.exec({
+      sql: `DELETE FROM ${table} WHERE ${noteCol} = ? AND ${propCol} = ?`,
+      bind: [noteId, id],
+    });
   }
-  const colList = cols.map(quoteIdent).join(", ");
-  const placeholders = cols.map(() => "?").join(", ");
-  db.exec({
-    sql: `INSERT INTO ${quoteIdent(tableName)} (${colList}) VALUES (${placeholders})`,
-    bind: cols.map((c) => data[c]),
-  });
-}
-
-export function updatePropertyRow(
-  db: Database,
-  tableName: string,
-  rowid: number,
-  data: Record,
-): void {
-  const cols = Object.keys(data);
-  if (cols.length === 0) return;
-  const setClause = cols.map((c) => `${quoteIdent(c)} = ?`).join(", ");
-  const bind: SqlValue[] = cols.map((c) => data[c]);
-  bind.push(rowid);
-  db.exec({
-    sql: `UPDATE ${quoteIdent(tableName)} SET ${setClause} WHERE rowid = ?`,
-    bind,
-  });
-}
-
-export function deletePropertyRow(
-  db: Database,
-  tableName: string,
-  rowid: number,
-): void {
-  db.exec({
-    sql: `DELETE FROM ${quoteIdent(tableName)} WHERE rowid = ?`,
-    bind: [rowid],
-  });
-}
-
-function quoteIdent(name: string): string {
-  return `"${name.replace(/"/g, '""')}"`;
+  for (const id of next) {
+    if (current.has(id)) continue;
+    db.exec({
+      sql: `INSERT INTO ${table} (${noteCol}, ${propCol}) VALUES (?, ?)`,
+      bind: [noteId, id],
+    });
+  }
 }
