@@ -1,25 +1,25 @@
 # refill
 
-A browser-native client for [note.db](https://github.com/kapiyva/notedb) SQLite files.
+A browser-native client for [note.sql](https://github.com/kapiyva/note.sql) SQLite files.
 
 English | [日本語](README.ja.md)
 
 ## Overview
 
-refill reads and writes any SQLite file that follows the note.db conventions, entirely in the browser.
+refill reads and writes any SQLite file that follows the note.sql conventions, entirely in the browser.
 
 - **Fully client-side** — WASM SQLite runs in the browser. Nothing leaves the page.
 - **Statically hostable** — Deployable to GitHub Pages, Cloudflare Pages, or any static host.
-- **Format-agnostic** — Works with any note.db–conforming format. No format-specific code.
-- **A reference implementation** — Minimal dependencies and plain code, intended to show how note.db conventions translate into a working tool.
+- **Format-agnostic** — Works with any note.sql–conforming format. No format-specific code.
+- **A reference implementation** — Minimal dependencies and plain code, intended to show how note.sql conventions translate into a working tool.
 
 ## Features
 
 - Open a local SQLite file (file picker or drag & drop)
 - Apply a format from a GitHub URL pointing to `format.sql`
-- Auto-detection of note tables, related tables, and views
-- CRUD on note records — Markdown editor + property panel (with NULL representation)
-- Sub-form editor for related tables (per Convention 5: `note_id` + `label`)
+- Auto-detection of note tables (Convention 1), property tables and their references (Convention 4), and views
+- CRUD on note records — Markdown editor + property panel (with NULL representation). `title` is optional; untitled notes are listed by their first body line
+- Property editing per Convention 4: single-value references as a label picker, multi-value references (junction tables) as label toggles, and adding new labels to a vocabulary
 - Read-only display of views
 - Save the modified database back to disk (download)
 
@@ -51,4 +51,4 @@ sqlite3 fixtures/test.db < fixtures/seed.sql
 
 ## See also
 
-- [note.db](https://github.com/kapiyva/notedb) — the conventions refill targets
+- [note.sql](https://github.com/kapiyva/note.sql) — the conventions refill targets
