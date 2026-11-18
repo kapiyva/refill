@@ -321,9 +321,12 @@ function inspect(db) {
   const noteTables = [...noteNames].map((name) => ({
     name,
     columns: columns.get(name),
-    single: columns.get(name)
-      .filter((c) => propertyNames.has(refs.get(name).get(c.name)))
-      .map((c) => ({ column: c.name, nullable: !c.notNull, hasDefault: c.hasDefault, propertyTable: refs.get(name).get(c.name) })),
+    single: columns.get(name).flatMap((c) => {
+      const target = refs.get(name).get(c.name);
+      return propertyNames.has(target)
+        ? [{ column: c.name, nullable: !c.notNull, hasDefault: c.hasDefault, propertyTable: target }]
+        : [];
+    }),
     multi: [],
   }));
 
@@ -837,7 +840,7 @@ function NoteEditor({ db, nt, target, version, write, onSave, onDelete, onDirty,
     for (const c of propCols) props[c] = rec?.[c] ?? null;
     const multi = {};
     for (const mv of nt.multi) multi[mv.junctionTable] = rec ? selectedIds(db, mv, target.id) : [];
-    return { title: String(rec?.title ?? ""), body: String(rec?.body ?? ""), props, multi };
+    return { title: String(rec?.title ?? ""), body: String(rec?.body ?? ""), props, multi, touched: {} };
   });
   const [form, setForm] = useState(initial);
   const update = (patch) => setForm((f) => ({ ...f, ...patch }));
@@ -859,7 +862,7 @@ function NoteEditor({ db, nt, target, version, write, onSave, onDelete, onDirty,
     if (target.kind === "new") {
       const data = { id: uuid(), title, body: form.body, created_at: ts, updated_at: ts };
       // Omit extras the user never set, so column defaults apply (Convention 5).
-      for (const c of propCols) if (form.touched?.[c] || form.props[c] !== null) data[c] = form.props[c];
+      for (const c of propCols) if (form.touched[c] || form.props[c] !== null) data[c] = form.props[c];
       onSave(data, form.multi);
     } else {
       // Only the columns the user changed, so untouched values stay exactly
@@ -993,21 +996,17 @@ function MultiField({ mv, value, onChange, ...field }) {
 
 /** Any other column: a raw value that can also be NULL. */
 function PlainField({ name, value, onChange }) {
-  if (value instanceof Uint8Array) {
-    // Binary data cannot be edited as text without destroying it.
-    return html`
-      <div class="plain small">
-        <span title=${name} style="overflow:hidden;text-overflow:ellipsis">${name}</span>
-        <span class="muted">${`<${value.length} bytes>`}</span>
-      </div>`;
-  }
   const isNull = value === null;
   return html`
     <div class="plain small">
       <span title=${name} style="overflow:hidden;text-overflow:ellipsis">${name}</span>
-      <input placeholder=${isNull ? "null" : ""} value=${isNull ? "" : String(value)}
-        onInput=${(e) => onChange(e.target.value)} />
-      <button class="link" title="Set to NULL" style=${isNull ? "visibility:hidden" : ""} onClick=${() => onChange(null)}>×</button>
+      ${value instanceof Uint8Array
+        // Binary data cannot be edited as text without destroying it.
+        ? html`<span class="muted">${`<${value.length} bytes>`}</span>`
+        : html`
+          <input placeholder=${isNull ? "null" : ""} value=${isNull ? "" : String(value)}
+            onInput=${(e) => onChange(e.target.value)} />
+          <button class="link" title="Set to NULL" style=${isNull ? "visibility:hidden" : ""} onClick=${() => onChange(null)}>×</button>`}
     </div>`;
 }
 

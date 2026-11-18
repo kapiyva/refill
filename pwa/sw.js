@@ -16,7 +16,8 @@ self.addEventListener("activate", (e) => {
 
 const sameVersion = (a, b) => {
   const tag = (r) => r?.headers.get("etag") || r?.headers.get("last-modified");
-  return tag(a) !== null && tag(a) !== undefined && tag(a) === tag(b);
+  const t = tag(a);
+  return t != null && t === tag(b);
 };
 
 // One cache entry per file: the query string is ignored, and refill.html
@@ -31,7 +32,7 @@ function cacheKey(request) {
   return url.href;
 }
 
-const fromCache = async (request) => (await caches.match(cacheKey(request))) ?? Response.error();
+const cached = (request) => caches.match(cacheKey(request));
 
 /** Keeps the cache up to date in the background; failures here never affect the response. */
 async function remember(request, res) {
@@ -46,8 +47,8 @@ self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET" || url.origin !== location.origin) return;
   e.respondWith((async () => {
     let res;
-    try { res = await fetch(e.request); } catch { return fromCache(e.request); }
-    if (!res.ok) return (await caches.match(cacheKey(e.request))) ?? res; // an error page never replaces a good copy
+    try { res = await fetch(e.request); } catch { return (await cached(e.request)) ?? Response.error(); }
+    if (!res.ok) return (await cached(e.request)) ?? res; // an error page never replaces a good copy
     e.waitUntil(remember(e.request, res.clone()).catch(() => {}));
     return res;
   })());
